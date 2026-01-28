@@ -22,6 +22,10 @@ Usage:
 
 from typing import Any
 
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class JiraToolError(Exception):
     """Base exception for all JIRA tool errors.
@@ -280,10 +284,13 @@ def format_error_response(error: Exception) -> dict[str, Any]:
         }
 
     # Handle non-JiraToolError exceptions
+    # Security: Log the actual error server-side but return generic message
+    # to prevent information disclosure (file paths, config values, etc.)
+    logger.exception("Unexpected error occurred", extra={"error_type": type(error).__name__})
     return {
         "success": False,
         "error": {
-            "message": str(error),
+            "message": "An unexpected error occurred",
             "code": "UNKNOWN_ERROR",
         },
     }

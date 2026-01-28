@@ -133,6 +133,30 @@ def _is_private_or_internal_ip(hostname: str) -> bool:
         return False
 
 
+def _is_allowed_hostname(hostname: str, allowed_patterns: list[str]) -> bool:
+    """Check if hostname matches any allowed pattern.
+
+    Supports glob-style patterns with * wildcard for subdomain matching.
+
+    Args:
+        hostname: The hostname to check.
+        allowed_patterns: List of allowed patterns (e.g., ["*.atlassian.net", "jira.example.com"]).
+
+    Returns:
+        True if hostname matches any pattern, False otherwise.
+    """
+    import fnmatch
+
+    if not hostname or not allowed_patterns:
+        return False
+
+    hostname_lower = hostname.lower()
+    for pattern in allowed_patterns:
+        if fnmatch.fnmatch(hostname_lower, pattern.lower()):
+            return True
+    return False
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
 
@@ -179,6 +203,10 @@ class Settings(BaseSettings):
     # Optional SSL configuration
     jira_ssl_verify: bool = True
 
+    # SSRF protection: allowed hostname patterns (glob-style with * wildcard)
+    # Set to empty list to disable hostname validation (not recommended)
+    jira_allowed_hosts: list[str] = ["*.atlassian.net"]
+
     # Server configuration
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 5472  # JIRA on phone keypad: J=5, I=4, R=7, A=2
@@ -205,7 +233,7 @@ class Settings(BaseSettings):
     cache_ttl_metadata: int = 2592000  # 30 days - issue types, priorities, statuses
     cache_ttl_projects: int = 2592000  # 30 days - projects, components, versions
     cache_ttl_agile: int = 2592000  # 30 days - boards, sprints
-    cache_ttl_users: int = 2592000  # 30 days - user search results
+    cache_ttl_users: int = 604800  # 7 days - user search results (shorter for privacy)
     cache_cleanup_interval: int = 86400  # Run cleanup daily
     cache_max_entries: int = 10000  # Maximum cache entries
 
@@ -237,10 +265,11 @@ class Settings(BaseSettings):
         """Get the full JIRA base URL.
 
         Security: Validates that the URL does not point to private/internal
-        IP addresses to prevent SSRF attacks.
+        IP addresses and matches allowed hostname patterns to prevent SSRF attacks.
 
         Raises:
-            ValueError: If the URL points to a private/internal IP.
+            ValueError: If the URL points to a private/internal IP or
+                       doesn't match allowed hostname patterns.
         """
         url = self.jira_url.strip()
 
@@ -259,6 +288,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"JIRA URL points to private/internal IP address: {hostname}. "
                 "This is blocked for security reasons (SSRF prevention)."
+            )
+
+        # SSRF Prevention: Validate hostname against allowlist
+        if self.jira_allowed_hosts and not _is_allowed_hostname(hostname, self.jira_allowed_hosts):
+            raise ValueError(
+                f"JIRA hostname '{hostname}' is not in the allowed hosts list. "
+                f"Allowed patterns: {self.jira_allowed_hosts}. "
+                "Set JIRA_ALLOWED_HOSTS to include this host or use '*.atlassian.net'."
             )
 
         return url.rstrip("/")
@@ -286,7 +323,8 @@ class Settings(BaseSettings):
             key_parts.append(self.jira_email)
 
         combined = ":".join(key_parts)
-        return hashlib.sha256(combined.encode()).hexdigest()[:16]
+        # Use 32 hex chars (128-bit) for adequate collision resistance
+        return hashlib.sha256(combined.encode()).hexdigest()[:32]
 
     @property
     def cache_encryption_key_resolved(self) -> str | None:

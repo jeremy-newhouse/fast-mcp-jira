@@ -36,6 +36,12 @@ if settings.cache_enabled:
 auth_provider = None
 if settings.mcp_api_key:
     auth_provider = ApiKeyVerifier(api_key=settings.mcp_api_key)
+else:
+    # Security warning: unauthenticated access
+    logger.warning(
+        "MCP_API_KEY not set - endpoint is UNAUTHENTICATED. "
+        "Set MCP_API_KEY environment variable for production deployments."
+    )
 
 
 @lifespan

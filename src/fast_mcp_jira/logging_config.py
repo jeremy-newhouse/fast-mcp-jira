@@ -36,6 +36,50 @@ correlation_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 T = TypeVar("T")
 
+# Exact field names that should always be redacted
+SENSITIVE_LOG_FIELDS_EXACT = {
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "encryption_key",
+    "mcp_api_key",
+    "jira_api_token",
+    "access_key",
+    "secret_key",
+    "private_key",
+}
+
+# Suffixes that indicate sensitive data (e.g., db_password, auth_token)
+# Note: _key is intentionally excluded as it's too generic (issue_key, cache_key)
+SENSITIVE_LOG_SUFFIXES = ("_password", "_secret", "_token", "_credential")
+
+
+def _sanitize_log_value(key: str, value: Any) -> Any:
+    """Sanitize log values by redacting sensitive fields.
+
+    Args:
+        key: Field name (checked against sensitive patterns)
+        value: Value to potentially redact
+
+    Returns:
+        Original value or "[REDACTED]" for sensitive fields
+    """
+    key_lower = key.lower()
+
+    # Check exact matches first
+    if key_lower in SENSITIVE_LOG_FIELDS_EXACT:
+        return "[REDACTED]"
+
+    # Check suffix patterns (e.g., db_password, auth_token)
+    if key_lower.endswith(SENSITIVE_LOG_SUFFIXES):
+        return "[REDACTED]"
+
+    return value
+
 
 class StructuredFormatter(logging.Formatter):
     """JSON-structured log formatter for production environments.
@@ -88,7 +132,8 @@ class StructuredFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs and not key.startswith("_"):
-                log_data[key] = value
+                # Sanitize sensitive fields before logging
+                log_data[key] = _sanitize_log_value(key, value)
 
         # Add exception info if present
         if record.exc_info:

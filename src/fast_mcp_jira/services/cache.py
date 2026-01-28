@@ -71,6 +71,58 @@ ENTITY_CATEGORY_MAP: dict[str, CacheCategory] = {
     "users": CacheCategory.USERS,
 }
 
+# Sensitive fields to filter from cached data by entity type
+# These fields contain PII or sensitive information that should not be persisted
+SENSITIVE_FIELDS_BY_ENTITY: dict[str, set[str]] = {
+    "users": {"emailAddress", "email", "avatarUrls", "applicationRoles"},
+    "issues": {"emailAddress", "email"},
+    "projects": {"email", "emailAddress"},
+}
+
+# Fields that are always filtered regardless of entity type
+SENSITIVE_FIELDS_GLOBAL: set[str] = {
+    "password",
+    "token",
+    "secret",
+    "credential",
+    "apiToken",
+    "accessToken",
+    "refreshToken",
+}
+
+
+def _filter_sensitive_data(data: Any, entity_type: str) -> Any:
+    """Remove sensitive fields from data before caching.
+
+    Recursively filters dictionaries and lists to remove fields that
+    contain PII or sensitive information.
+
+    Args:
+        data: The data to filter (dict, list, or primitive).
+        entity_type: The entity type for type-specific filtering.
+
+    Returns:
+        Filtered data with sensitive fields removed.
+    """
+    if isinstance(data, dict):
+        entity_sensitive = SENSITIVE_FIELDS_BY_ENTITY.get(entity_type, set())
+        filtered = {}
+        for key, value in data.items():
+            # Skip globally sensitive fields
+            if key in SENSITIVE_FIELDS_GLOBAL:
+                continue
+            # Skip entity-specific sensitive fields
+            if key in entity_sensitive:
+                continue
+            # Recurse into nested structures
+            filtered[key] = _filter_sensitive_data(value, entity_type)
+        return filtered
+
+    if isinstance(data, list):
+        return [_filter_sensitive_data(item, entity_type) for item in data]
+
+    return data
+
 
 class CacheService:
     """Async SQLite cache service for JIRA API responses.
@@ -138,7 +190,10 @@ class CacheService:
                     if encryption_key:
                         # Set encryption key via PRAGMA (SQLCipher)
                         # Note: This only works if SQLite is compiled with SQLCipher
-                        await self._db.execute(f"PRAGMA key = '{encryption_key}'")
+                        # Security: Use hex format to prevent SQL injection via key value
+                        # SQLCipher accepts x'<hex>' format for keys
+                        hex_key = encryption_key.encode("utf-8").hex()
+                        await self._db.execute(f"PRAGMA key = \"x'{hex_key}'\"")
                         await self._db.execute("PRAGMA cipher_compatibility = 4")
                         logger.info("Cache encryption enabled (SQLCipher)")
                 except Exception as e:
@@ -146,6 +201,13 @@ class CacheService:
                         "Cache encryption failed - ensure SQLCipher is available",
                         extra={"error": str(e)},
                     )
+            else:
+                # Security warning for unencrypted cache
+                logger.warning(
+                    "Cache encryption is DISABLED - cached JIRA data is stored unencrypted. "
+                    "For production deployments, set CACHE_ENCRYPTION_ENABLED=true and provide "
+                    "CACHE_ENCRYPTION_KEY or CACHE_ENCRYPTION_KEY_FILE."
+                )
 
             # Enable WAL mode for better concurrent read performance
             await self._db.execute("PRAGMA journal_mode=WAL")
@@ -298,16 +360,28 @@ class CacheService:
 
             if row:
                 await self._record_hit(entity_type)
-                logger.debug(
-                    "Cache hit",
-                    extra={"cache_key": cache_key, "entity_type": entity_type},
+                # Audit log: cache access (hit)
+                logger.info(
+                    "Cache access",
+                    extra={
+                        "operation": "get",
+                        "cache_hit": True,
+                        "entity_type": entity_type,
+                        "partition": self.settings.cache_partition_key[:8],
+                    },
                 )
                 return json.loads(row["value"])
             else:
                 await self._record_miss(entity_type)
-                logger.debug(
-                    "Cache miss",
-                    extra={"cache_key": cache_key, "entity_type": entity_type},
+                # Audit log: cache access (miss)
+                logger.info(
+                    "Cache access",
+                    extra={
+                        "operation": "get",
+                        "cache_hit": False,
+                        "entity_type": entity_type,
+                        "partition": self.settings.cache_partition_key[:8],
+                    },
                 )
                 return None
 
@@ -327,6 +401,9 @@ class CacheService:
     ) -> None:
         """Store a value in cache.
 
+        Automatically filters sensitive fields (PII, credentials) before storing
+        to prevent sensitive data from being persisted in the cache.
+
         Args:
             cache_key: The cache key.
             entity_type: Type of entity being cached.
@@ -344,6 +421,9 @@ class CacheService:
             actual_ttl = ttl if ttl is not None else self._get_ttl(entity_type)
             expires_at = now + actual_ttl
 
+            # Filter sensitive data before caching
+            filtered_value = _filter_sensitive_data(value, entity_type)
+
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO cache
@@ -353,19 +433,21 @@ class CacheService:
                 (
                     cache_key,
                     entity_type,
-                    json.dumps(value),
+                    json.dumps(filtered_value),
                     now,
                     expires_at,
                     self.settings.cache_partition_key,
                 ),
             )
             await self._db.commit()
-            logger.debug(
-                "Cache set",
+            # Audit log: cache write
+            logger.info(
+                "Cache access",
                 extra={
-                    "cache_key": cache_key,
+                    "operation": "set",
                     "entity_type": entity_type,
                     "ttl_seconds": actual_ttl,
+                    "partition": self.settings.cache_partition_key[:8],
                 },
             )
 
@@ -547,7 +629,10 @@ class CacheService:
             return {"enabled": True, "error": str(e)}
 
     async def cleanup_expired(self) -> int:
-        """Remove expired cache entries.
+        """Remove expired cache entries for this partition.
+
+        Only removes entries belonging to the current JIRA instance/user
+        to maintain partition isolation.
 
         Returns:
             Number of entries removed.
@@ -557,8 +642,8 @@ class CacheService:
 
         try:
             cursor = await self._db.execute(
-                "DELETE FROM cache WHERE expires_at < ?",
-                (time.time(),),
+                "DELETE FROM cache WHERE expires_at < ? AND jira_instance = ?",
+                (time.time(), self.settings.cache_partition_key),
             )
             await self._db.commit()
             count = cursor.rowcount
@@ -580,28 +665,33 @@ class CacheService:
                 await asyncio.sleep(self.settings.cache_cleanup_interval)
                 await self.cleanup_expired()
 
-                # Check max entries limit
+                # Check max entries limit for this partition
                 if self._db is None:
                     continue
 
-                cursor = await self._db.execute("SELECT COUNT(*) FROM cache")
+                partition_key = self.settings.cache_partition_key
+                cursor = await self._db.execute(
+                    "SELECT COUNT(*) FROM cache WHERE jira_instance = ?",
+                    (partition_key,),
+                )
                 row = await cursor.fetchone()
                 if row is None:
                     continue
 
                 count = row[0]
                 if count > self.settings.cache_max_entries:
-                    # Remove oldest entries exceeding limit
+                    # Remove oldest entries exceeding limit (partition-aware)
                     excess = count - self.settings.cache_max_entries
                     await self._db.execute(
                         """
                         DELETE FROM cache WHERE cache_key IN (
                             SELECT cache_key FROM cache
+                            WHERE jira_instance = ?
                             ORDER BY created_at ASC
                             LIMIT ?
                         )
                         """,
-                        (excess,),
+                        (partition_key, excess),
                     )
                     await self._db.commit()
                     logger.info(

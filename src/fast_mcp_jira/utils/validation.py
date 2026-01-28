@@ -15,7 +15,50 @@ Security Features:
 import re
 from typing import Any
 
+import bleach
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# =============================================================================
+# XSS Sanitization Configuration (using bleach allowlist approach)
+# =============================================================================
+
+# Safe HTML tags that are allowed in responses
+ALLOWED_HTML_TAGS = [
+    "p",
+    "br",
+    "b",
+    "i",
+    "u",
+    "strong",
+    "em",
+    "a",
+    "ul",
+    "ol",
+    "li",
+    "code",
+    "pre",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "span",
+    "div",
+]
+
+# Safe attributes for allowed tags
+ALLOWED_HTML_ATTRIBUTES = {
+    "a": ["href", "title"],
+    "span": ["class"],
+    "div": ["class"],
+    "code": ["class"],
+    "pre": ["class"],
+}
+
+# Safe URL protocols
+ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 
 # =============================================================================
 # Pydantic Validation Models
@@ -116,6 +159,9 @@ class AttachmentInput(BaseModel):
         # Block null bytes
         if "\x00" in v:
             raise ValueError("Filename contains invalid characters")
+        # Block hidden/dotfiles (e.g., .bashrc, .env, .gitignore)
+        if v.startswith("."):
+            raise ValueError("Hidden files (starting with dot) are not allowed")
         # Block dangerous extensions
         dangerous_extensions = {".exe", ".bat", ".cmd", ".sh", ".ps1", ".dll", ".so"}
         ext = ("." + v.rsplit(".", 1)[-1].lower()) if "." in v else ""
@@ -599,18 +645,26 @@ def validate_account_id(account_id: str | None, field_name: str = "account_id") 
 def sanitize_for_response(data: Any) -> Any:
     """Sanitize data for safe inclusion in responses.
 
-    Removes potentially dangerous content from strings.
+    Uses bleach library with allowlist approach for robust XSS prevention:
+    - Only allows safe HTML tags (p, br, a, ul, ol, li, code, pre, etc.)
+    - Only allows safe attributes (href, title on links)
+    - Only allows safe URL protocols (http, https, mailto)
+    - Strips all other HTML content
 
     Args:
         data: Data to sanitize (string, dict, list, or other)
 
     Returns:
-        Sanitized data
+        Sanitized data with dangerous HTML removed
     """
     if isinstance(data, str):
-        # Remove dangerous HTML tags (script, iframe, object, embed, form)
-        dangerous_tags = r"<(script|iframe|object|embed|form)[^>]*>.*?</\1>"
-        return re.sub(dangerous_tags, "", data, flags=re.IGNORECASE | re.DOTALL)
+        return bleach.clean(
+            data,
+            tags=ALLOWED_HTML_TAGS,
+            attributes=ALLOWED_HTML_ATTRIBUTES,
+            protocols=ALLOWED_PROTOCOLS,
+            strip=True,
+        )
 
     if isinstance(data, dict):
         return {k: sanitize_for_response(v) for k, v in data.items()}

@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "pydantic-settings>=2.0,<3.0",
     "aiosqlite>=0.19.0,<1.0.0",
+    "bleach>=6.0.0,<7.0.0",
 ]
 
 [project.optional-dependencies]
