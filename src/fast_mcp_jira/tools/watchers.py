@@ -14,9 +14,12 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.validation import ValidationError, validate_account_id, validate_issue_key
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Get all watchers of a JIRA issue.")
@@ -50,8 +53,9 @@ async def get_watchers(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting watchers for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Add a user as a watcher to a JIRA issue.")
@@ -79,8 +83,9 @@ async def add_watcher(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error adding watcher to %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Remove a user from watching a JIRA issue.")
@@ -106,5 +111,6 @@ async def remove_watcher(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error removing watcher from %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}

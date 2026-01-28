@@ -12,7 +12,10 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from ..logging_config import get_logger
 from ..server import cache, mcp
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Get cache statistics and health information.")
@@ -34,8 +37,12 @@ async def get_cache_stats() -> dict[str, Any]:
             "error": {"message": "Cache is disabled", "code": "CACHE_DISABLED"},
         }
 
-    stats = await cache.get_stats()
-    return {"success": True, **stats}
+    try:
+        stats = await cache.get_stats()
+        return {"success": True, **stats}
+    except Exception:
+        logger.exception("Unexpected error getting cache stats")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Invalidate (clear) cache entries.")
@@ -97,17 +104,21 @@ async def invalidate_cache(
             },
         }
 
-    if invalidate_all:
-        count = await cache.invalidate()
-    elif entity_type:
-        count = await cache.invalidate(entity_type=entity_type)
-    else:
-        count = await cache.invalidate(cache_key=cache_key)
+    try:
+        if invalidate_all:
+            count = await cache.invalidate()
+        elif entity_type:
+            count = await cache.invalidate(entity_type=entity_type)
+        else:
+            count = await cache.invalidate(cache_key=cache_key)
 
-    return {
-        "success": True,
-        "invalidated_count": count,
-        "entity_type": entity_type,
-        "cache_key": cache_key,
-        "invalidate_all": invalidate_all,
-    }
+        return {
+            "success": True,
+            "invalidated_count": count,
+            "entity_type": entity_type,
+            "cache_key": cache_key,
+            "invalidate_all": invalidate_all,
+        }
+    except Exception:
+        logger.exception("Unexpected error invalidating cache")
+        return {"success": False, "error": "Internal error occurred"}

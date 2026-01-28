@@ -14,6 +14,8 @@ This module provides tools for managing JIRA Agile boards and sprints:
 
 Security Features:
 - JQL queries are validated to prevent injection attacks
+- Sprint names and goals are validated
+- Field lists are validated
 
 Caching:
 - Boards and sprints are cached for 30 minutes
@@ -24,10 +26,20 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
-from ..utils.validation import JqlInput, validate_issue_key
+from ..utils.validation import (
+    FieldListInput,
+    JqlInput,
+    SprintGoalInput,
+    SprintNameInput,
+    ValidationError,
+    validate_issue_key,
+)
+
+logger = get_logger(__name__)
 
 # Agile REST API base path
 AGILE_BASE = "/rest/agile/1.0"
@@ -110,8 +122,9 @@ async def get_boards(
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting boards")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get details of a specific JIRA board.")
@@ -155,8 +168,9 @@ async def get_board(
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting board %s", board_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get sprints for a JIRA board.")
@@ -226,8 +240,9 @@ async def get_sprints(
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting sprints for board %s", board_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all issues in a sprint.")
@@ -256,7 +271,9 @@ async def get_sprint_issues(
             "startAt": start_at,
         }
         if fields:
-            params["fields"] = fields
+            # Validate fields parameter
+            validated_fields = FieldListInput(fields=fields)
+            params["fields"] = validated_fields.fields
         if jql:
             # Validate JQL to prevent injection attacks
             validated_jql = JqlInput(jql=jql)
@@ -270,11 +287,13 @@ async def get_sprint_issues(
             "issues": result.get("issues", []),
         }
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "jql"}
+        field_name = "jql" if "jql" in str(e) else "fields"
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": field_name}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting issues for sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 # =============================================================================
@@ -304,8 +323,11 @@ async def create_sprint(
     The sprint is created in 'future' state. Use start_sprint to activate it.
     """
     try:
+        # Validate sprint name
+        validated_name = SprintNameInput(name=name)
+
         body: dict[str, Any] = {
-            "name": name,
+            "name": validated_name.name,
             "originBoardId": board_id,
         }
         if start_date:
@@ -313,7 +335,9 @@ async def create_sprint(
         if end_date:
             body["endDate"] = end_date
         if goal:
-            body["goal"] = goal
+            # Validate goal
+            validated_goal = SprintGoalInput(goal=goal)
+            body["goal"] = validated_goal.goal
 
         result = await jira.post(f"{AGILE_BASE}/sprint", body=body)
 
@@ -332,10 +356,15 @@ async def create_sprint(
                 "goal": result.get("goal"),
             },
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "name"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error creating sprint on board %s", board_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Update sprint details (name, dates, goal, or state).")
@@ -368,13 +397,17 @@ async def update_sprint(
 
         body: dict[str, Any] = {"state": state}
         if name is not None:
-            body["name"] = name
+            # Validate sprint name
+            validated_name = SprintNameInput(name=name)
+            body["name"] = validated_name.name
         if start_date is not None:
             body["startDate"] = start_date
         if end_date is not None:
             body["endDate"] = end_date
         if goal is not None:
-            body["goal"] = goal
+            # Validate goal
+            validated_goal = SprintGoalInput(goal=goal)
+            body["goal"] = validated_goal.goal
 
         # Check if only state is set (no actual updates requested)
         if len(body) == 1 and "state" in body:
@@ -397,10 +430,13 @@ async def update_sprint(
                 "goal": result.get("goal"),
             },
         }
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "name"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error updating sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Start a future sprint (sets state to active).")
@@ -446,8 +482,9 @@ async def start_sprint(
         }
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error starting sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Complete an active sprint.")
@@ -479,8 +516,9 @@ async def complete_sprint(
         }
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error completing sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Move issues to a sprint or backlog.")
@@ -521,10 +559,13 @@ async def move_issues_to_sprint(
                 "sprint_id": sprint_id,
                 "issue_keys": validated_keys,
             }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error moving issues to sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete a sprint (issues return to backlog).")
@@ -549,5 +590,6 @@ async def delete_sprint(
         }
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting sprint %s", sprint_id)
+        return {"success": False, "error": "Internal error occurred"}

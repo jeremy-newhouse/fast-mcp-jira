@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.adf import extract_text_from_adf, markdown_to_adf
@@ -25,6 +26,8 @@ from ..utils.validation import (
     validate_comment_body,
     validate_issue_key,
 )
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Add a comment to a JIRA issue.")
@@ -58,8 +61,9 @@ async def add_comment(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error adding comment to %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all comments on a JIRA issue.")
@@ -107,8 +111,9 @@ async def get_comments(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting comments for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete a comment from a JIRA issue.")
@@ -151,5 +156,6 @@ async def delete_comment(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "comment_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting comment %s from %s", comment_id, issue_key)
+        return {"success": False, "error": "Internal error occurred"}

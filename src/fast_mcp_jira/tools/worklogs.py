@@ -8,6 +8,7 @@ This module provides tools for managing time tracking on JIRA issues:
 Security Features:
 - Issue keys are validated against JIRA format
 - Worklog IDs are validated as numeric
+- Time spent format is validated
 """
 
 from typing import Annotated, Any
@@ -15,10 +16,18 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.adf import extract_text_from_adf, markdown_to_adf
-from ..utils.validation import NumericIdInput, ValidationError, validate_issue_key
+from ..utils.validation import (
+    NumericIdInput,
+    TimeSpentInput,
+    ValidationError,
+    validate_issue_key,
+)
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Log time spent on a JIRA issue.")
@@ -41,7 +50,10 @@ async def add_worklog(
     try:
         issue_key = validate_issue_key(issue_key)
 
-        body: dict[str, Any] = {"timeSpent": time_spent}
+        # Validate time spent format
+        validated_time = TimeSpentInput(time_spent=time_spent)
+
+        body: dict[str, Any] = {"timeSpent": validated_time.time_spent}
 
         if comment:
             body["comment"] = markdown_to_adf(comment)
@@ -64,10 +76,13 @@ async def add_worklog(
         }
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "time_spent"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error adding worklog to %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all worklogs for a JIRA issue.")
@@ -119,8 +134,9 @@ async def get_worklogs(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting worklogs for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete a worklog entry from a JIRA issue.")
@@ -145,5 +161,6 @@ async def delete_worklog(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "worklog_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting worklog %s from %s", worklog_id, issue_key)
+        return {"success": False, "error": "Internal error occurred"}

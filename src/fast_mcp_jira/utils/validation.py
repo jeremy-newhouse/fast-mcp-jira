@@ -148,7 +148,8 @@ class JqlInput(BaseModel):
         """Check for potential injection patterns."""
         v = v.strip()
         # Check for SQL-like injection patterns
-        dangerous_patterns = [r";\s*$", r"--", r"/\*", r"\*/"]
+        # Block semicolons anywhere (not just at end) to prevent statement chaining
+        dangerous_patterns = [r";", r"--", r"/\*", r"\*/"]
         v_lower = v.lower()
         for pattern in dangerous_patterns:
             if re.search(pattern, v_lower):
@@ -258,6 +259,194 @@ class LabelListInput(BaseModel):
                 )
             validated.append(label)
         return validated
+
+
+class TimeSpentInput(BaseModel):
+    """Validated JIRA time spent format.
+
+    JIRA accepts formats like: 2h, 30m, 1d, 2h 30m, 1w 2d 3h
+
+    Example:
+        >>> time = TimeSpentInput(time_spent="2h 30m")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    time_spent: str = Field(..., max_length=50, description="Time in JIRA format (e.g., 2h 30m)")
+
+    @field_validator("time_spent")
+    @classmethod
+    def validate_format(cls, v: str) -> str:
+        """Validate time spent format."""
+        v = v.strip()
+        # JIRA time format: combinations of weeks, days, hours, minutes
+        # e.g., "1w", "2d", "3h", "30m", "1w 2d 3h 30m", "2h30m"
+        if not re.match(r"^(\d+[wdhm]\s*)+$", v.lower()):
+            raise ValueError(
+                f"Invalid time format '{v}'. Use JIRA format like '2h', '30m', '1d 2h 30m'"
+            )
+        return v
+
+
+class TransitionNameInput(BaseModel):
+    """Validated workflow transition name.
+
+    Example:
+        >>> transition = TransitionNameInput(name="In Progress")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(..., max_length=255, description="Transition name")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate transition name."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Transition name cannot be empty")
+        # Allow alphanumeric, spaces, hyphens, underscores
+        if not re.match(r"^[\w\s\-]+$", v):
+            raise ValueError("Transition name contains invalid characters")
+        return v
+
+
+class LinkTypeInput(BaseModel):
+    """Validated issue link type name.
+
+    Example:
+        >>> link = LinkTypeInput(link_type="Blocks")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    link_type: str = Field(..., max_length=255, description="Link type name")
+
+    @field_validator("link_type")
+    @classmethod
+    def validate_link_type(cls, v: str) -> str:
+        """Validate link type name."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Link type cannot be empty")
+        # Allow alphanumeric, spaces, hyphens
+        if not re.match(r"^[\w\s\-]+$", v):
+            raise ValueError("Link type contains invalid characters")
+        return v
+
+
+class FieldListInput(BaseModel):
+    """Validated comma-separated field list.
+
+    Example:
+        >>> fields = FieldListInput(fields="summary,status,assignee")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    fields: str = Field(..., max_length=1000, description="Comma-separated field names")
+
+    @field_validator("fields")
+    @classmethod
+    def validate_fields(cls, v: str) -> str:
+        """Validate field list format."""
+        v = v.strip()
+        if not v:
+            return v
+        # Each field should be alphanumeric with underscores (for custom fields)
+        for field in v.split(","):
+            field = field.strip()
+            if field and not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", field):
+                raise ValueError(f"Invalid field name: '{field}'")
+        return v
+
+
+class SprintNameInput(BaseModel):
+    """Validated sprint name.
+
+    Example:
+        >>> sprint = SprintNameInput(name="Sprint 1")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(..., max_length=30, description="Sprint name (max 30 chars)")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate sprint name."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Sprint name cannot be empty")
+        return v
+
+
+class SprintGoalInput(BaseModel):
+    """Validated sprint goal.
+
+    Example:
+        >>> goal = SprintGoalInput(goal="Complete authentication feature")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    goal: str = Field(..., max_length=1000, description="Sprint goal")
+
+
+# Allowed fields for bulk updates (security: prevent updating sensitive fields)
+ALLOWED_BULK_UPDATE_FIELDS = {
+    "summary",
+    "description",
+    "priority",
+    "labels",
+    "assignee",
+    "reporter",
+    "components",
+    "fixVersions",
+    "versions",
+    "duedate",
+    "environment",
+    # Custom fields are allowed if they start with customfield_
+}
+
+
+class BulkUpdateFieldsInput(BaseModel):
+    """Validated bulk update fields.
+
+    Only allows updates to safe, known fields.
+
+    Example:
+        >>> updates = BulkUpdateFieldsInput(
+        ...     updates={"priority": {"name": "High"}, "labels": ["urgent"]}
+        ... )
+    """
+
+    updates: dict[str, Any] = Field(..., description="Field updates")
+
+    @field_validator("updates")
+    @classmethod
+    def validate_fields(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate that only allowed fields are being updated."""
+        if not v:
+            raise ValueError("No updates provided")
+
+        for field_name in v.keys():
+            # Allow known safe fields
+            if field_name in ALLOWED_BULK_UPDATE_FIELDS:
+                continue
+            # Allow custom fields
+            if field_name.startswith("customfield_"):
+                # Validate custom field ID format
+                if not re.match(r"^customfield_\d+$", field_name):
+                    raise ValueError(f"Invalid custom field format: '{field_name}'")
+                continue
+            raise ValueError(
+                f"Field '{field_name}' is not allowed in bulk updates. "
+                f"Allowed fields: {', '.join(sorted(ALLOWED_BULK_UPDATE_FIELDS))}"
+            )
+        return v
 
 
 # =============================================================================

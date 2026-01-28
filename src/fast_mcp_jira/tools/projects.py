@@ -8,6 +8,7 @@ This module provides tools for managing JIRA projects:
 
 Security Features:
 - Project keys are validated against JIRA format
+- Expand parameters are validated
 
 Caching:
 - Projects, components, and versions are cached for 6 hours
@@ -17,10 +18,13 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
 from ..utils.validation import ValidationError, validate_project_key
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="List all JIRA projects.")
@@ -89,8 +93,9 @@ async def get_projects(
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting projects")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get details of a specific JIRA project.")
@@ -147,8 +152,9 @@ async def get_project(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting project %s", project_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get components for a JIRA project.")
@@ -201,8 +207,9 @@ async def get_components(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting components for %s", project_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get versions/releases for a JIRA project.")
@@ -278,5 +285,6 @@ async def get_versions(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting versions for %s", project_key)
+        return {"success": False, "error": "Internal error occurred"}

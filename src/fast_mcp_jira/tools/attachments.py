@@ -19,6 +19,7 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.validation import (
@@ -27,6 +28,8 @@ from ..utils.validation import (
     ValidationError,
     validate_issue_key,
 )
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Get list of attachments on a JIRA issue.")
@@ -97,8 +100,9 @@ async def get_attachments(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting attachments for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get metadata for a specific attachment by ID.")
@@ -159,8 +163,9 @@ async def get_attachment(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "attachment_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting attachment %s", attachment_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete an attachment from JIRA.")
@@ -197,8 +202,9 @@ async def delete_attachment(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "attachment_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting attachment %s", attachment_id)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Add an attachment to a JIRA issue.")
@@ -296,5 +302,6 @@ async def add_attachment(
         return {"success": False, "error": msg, "field": str(field)}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error adding attachment to %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}

@@ -14,6 +14,7 @@ Security Features:
 - JQL queries are validated to prevent injection attacks
 - Issue keys are validated against JIRA format
 - Input lengths are enforced to prevent DoS
+- Field lists are validated
 """
 
 from typing import Annotated, Any
@@ -21,10 +22,12 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.adf import markdown_to_adf
 from ..utils.validation import (
+    FieldListInput,
     JqlInput,
     ValidationError,
     validate_issue_key,
@@ -32,6 +35,8 @@ from ..utils.validation import (
     validate_project_key,
     validate_summary,
 )
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Create a new JIRA issue.")
@@ -90,8 +95,9 @@ async def create_issue(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error creating issue in %s", project_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get details of a JIRA issue by its key.")
@@ -111,9 +117,11 @@ async def get_issue(
         issue_key = validate_issue_key(issue_key)
         params: dict[str, str] = {}
         if fields:
-            params["fields"] = fields
+            validated_fields = FieldListInput(fields=fields)
+            params["fields"] = validated_fields.fields
         if expand:
-            params["expand"] = expand
+            validated_expand = FieldListInput(fields=expand)
+            params["expand"] = validated_expand.fields
 
         result = await jira.get(
             f"/rest/api/3/issue/{issue_key}",
@@ -122,10 +130,13 @@ async def get_issue(
         return {"success": True, "issue": result}
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "fields"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting issue %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Search for JIRA issues using JQL (JIRA Query Language).")
@@ -202,8 +213,9 @@ async def search_issues(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "jql"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error searching issues")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Update fields on an existing JIRA issue.")
@@ -258,8 +270,9 @@ async def update_issue(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error updating issue %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete a JIRA issue.")
@@ -279,8 +292,9 @@ async def delete_issue(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting issue %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Transition a JIRA issue to a new status.")
@@ -335,8 +349,9 @@ async def transition_issue(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error transitioning issue %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get available transitions for a JIRA issue.")
@@ -365,8 +380,9 @@ async def get_transitions(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting transitions for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get changelog/history for a JIRA issue.")
@@ -417,5 +433,6 @@ async def get_changelog(
         return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting changelog for %s", issue_key)
+        return {"success": False, "error": "Internal error occurred"}

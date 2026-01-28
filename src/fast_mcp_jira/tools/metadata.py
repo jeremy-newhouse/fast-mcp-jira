@@ -15,9 +15,12 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Get all issue types available in JIRA.")
@@ -62,8 +65,9 @@ async def get_issue_types() -> dict[str, Any]:
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting issue types")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all priority levels available in JIRA.")
@@ -107,8 +111,9 @@ async def get_priorities() -> dict[str, Any]:
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting priorities")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all workflow statuses available in JIRA.")
@@ -153,8 +158,9 @@ async def get_statuses() -> dict[str, Any]:
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting statuses")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Search for JIRA users by query string.")
@@ -214,8 +220,9 @@ async def search_users(
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error searching users")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Get all available fields in JIRA.")
@@ -262,5 +269,6 @@ async def get_fields() -> dict[str, Any]:
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting fields")
+        return {"success": False, "error": "Internal error occurred"}

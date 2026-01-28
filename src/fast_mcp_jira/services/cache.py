@@ -125,8 +125,8 @@ class CacheService:
             if self._initialized:
                 return
 
-            # Ensure directory exists
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure directory exists with restrictive permissions (owner only)
+            self._db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
             self._db = await aiosqlite.connect(str(self._db_path))
             self._db.row_factory = aiosqlite.Row
@@ -233,7 +233,19 @@ class CacheService:
             return "default"
         # Sort keys for consistent hashing
         serialized = json.dumps(params, sort_keys=True, default=str)
-        return hashlib.md5(serialized.encode()).hexdigest()[:12]
+        return hashlib.sha256(serialized.encode()).hexdigest()[:12]
+
+    @staticmethod
+    def escape_like_pattern(pattern: str) -> str:
+        """Escape SQL LIKE wildcards in a pattern.
+
+        Args:
+            pattern: The pattern to escape.
+
+        Returns:
+            Pattern with % and _ escaped.
+        """
+        return pattern.replace("%", "\\%").replace("_", "\\_")
 
     async def get(
         self,
@@ -379,9 +391,11 @@ class CacheService:
                     (entity_type, self.settings.cache_partition_key),
                 )
             elif prefix:
+                # Escape LIKE wildcards to prevent unintended matches
+                escaped_prefix = self.escape_like_pattern(prefix)
                 cursor = await self._db.execute(
-                    "DELETE FROM cache WHERE cache_key LIKE ? AND jira_instance = ?",
-                    (f"{prefix}%", self.settings.cache_partition_key),
+                    "DELETE FROM cache WHERE cache_key LIKE ? ESCAPE '\\' AND jira_instance = ?",
+                    (f"{escaped_prefix}%", self.settings.cache_partition_key),
                 )
             else:
                 # Invalidate all for this instance

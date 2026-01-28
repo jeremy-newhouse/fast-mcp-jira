@@ -8,6 +8,7 @@ This module provides tools for managing links between JIRA issues:
 Security Features:
 - Issue keys are validated against JIRA format
 - Link IDs are validated as numeric
+- Link type names are validated
 
 Caching:
 - Link types are cached for 24 hours (rarely change)
@@ -18,10 +19,18 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
+from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
-from ..utils.validation import NumericIdInput, ValidationError, validate_issue_key
+from ..utils.validation import (
+    LinkTypeInput,
+    NumericIdInput,
+    ValidationError,
+    validate_issue_key,
+)
+
+logger = get_logger(__name__)
 
 
 @mcp.tool(description="Get all issue link types available in JIRA.")
@@ -65,8 +74,9 @@ async def get_link_types() -> dict[str, Any]:
         return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error getting link types")
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Create a link between two JIRA issues.")
@@ -87,8 +97,11 @@ async def create_link(
         inward_issue = validate_issue_key(inward_issue)
         outward_issue = validate_issue_key(outward_issue)
 
+        # Validate link type
+        validated_link_type = LinkTypeInput(link_type=link_type)
+
         body = {
-            "type": {"name": link_type},
+            "type": {"name": validated_link_type.link_type},
             "inwardIssue": {"key": inward_issue},
             "outwardIssue": {"key": outward_issue},
         }
@@ -97,14 +110,19 @@ async def create_link(
             "success": True,
             "inward_issue": inward_issue,
             "outward_issue": outward_issue,
-            "link_type": link_type,
+            "link_type": validated_link_type.link_type,
         }
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "link_type"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception(
+            "Unexpected error creating link between %s and %s", inward_issue, outward_issue
+        )
+        return {"success": False, "error": "Internal error occurred"}
 
 
 @mcp.tool(description="Delete an issue link by its ID.")
@@ -125,5 +143,6 @@ async def delete_link(
         return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "link_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error deleting link %s", link_id)
+        return {"success": False, "error": "Internal error occurred"}

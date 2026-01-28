@@ -23,7 +23,12 @@ from ..config import get_settings
 from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
-from ..utils.validation import ValidationError, validate_issue_key
+from ..utils.validation import (
+    BulkUpdateFieldsInput,
+    TransitionNameInput,
+    ValidationError,
+    validate_issue_key,
+)
 
 logger = get_logger(__name__)
 
@@ -35,8 +40,9 @@ async def _update_single_issue(issue_key: str, updates: dict[str, Any]) -> dict[
         return {"issue_key": issue_key, "success": True}
     except JiraError as e:
         return {"issue_key": issue_key, "success": False, "error": str(e)}
-    except Exception as e:
-        return {"issue_key": issue_key, "success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error updating issue %s", issue_key)
+        return {"issue_key": issue_key, "success": False, "error": "Internal error occurred"}
 
 
 async def _transition_single_issue(issue_key: str, transition_id: str) -> dict[str, Any]:
@@ -49,8 +55,9 @@ async def _transition_single_issue(issue_key: str, transition_id: str) -> dict[s
         return {"issue_key": issue_key, "success": True}
     except JiraError as e:
         return {"issue_key": issue_key, "success": False, "error": str(e)}
-    except Exception as e:
-        return {"issue_key": issue_key, "success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error transitioning issue %s", issue_key)
+        return {"issue_key": issue_key, "success": False, "error": "Internal error occurred"}
 
 
 async def _add_single_comment(issue_key: str, body: str) -> dict[str, Any]:
@@ -65,8 +72,9 @@ async def _add_single_comment(issue_key: str, body: str) -> dict[str, Any]:
         return {"issue_key": issue_key, "success": True}
     except JiraError as e:
         return {"issue_key": issue_key, "success": False, "error": str(e)}
-    except Exception as e:
-        return {"issue_key": issue_key, "success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Unexpected error adding comment to issue %s", issue_key)
+        return {"issue_key": issue_key, "success": False, "error": "Internal error occurred"}
 
 
 async def _get_transition_id(issue_key: str, transition_name: str) -> str | None:
@@ -131,8 +139,11 @@ async def bulk_update_issues(
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": "issue_keys"}
 
-    if not updates:
-        return {"success": False, "error": "No updates provided", "code": "VALIDATION_ERROR"}
+    # Validate update fields (security: only allow known safe fields)
+    try:
+        BulkUpdateFieldsInput(updates=updates)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "field": "updates"}
 
     logger.info(
         "Starting bulk update",
@@ -214,6 +225,12 @@ async def bulk_transition_issues(
         validated_keys = [validate_issue_key(key) for key in issue_keys]
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": "issue_keys"}
+
+    # Validate transition name
+    try:
+        TransitionNameInput(name=transition_name)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "field": "transition_name"}
 
     logger.info(
         "Starting bulk transition",

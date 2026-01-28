@@ -30,6 +30,33 @@ logger = logging.getLogger(__name__)
 # Maximum error message length to prevent info leakage
 MAX_ERROR_MESSAGE_LENGTH = 500
 
+# Fields that may contain sensitive data and should not be logged
+SENSITIVE_PARAM_KEYS = {"jql", "body", "content", "password", "token", "secret", "key"}
+
+
+def _sanitize_params_for_logging(params: dict | None) -> str:
+    """Sanitize parameters for safe logging.
+
+    Redacts values of sensitive keys to prevent information leakage.
+
+    Args:
+        params: Query parameters dict.
+
+    Returns:
+        String representation safe for logging.
+    """
+    if not params:
+        return "{}"
+    sanitized = {}
+    for key, value in params.items():
+        if key.lower() in SENSITIVE_PARAM_KEYS:
+            sanitized[key] = "[REDACTED]"
+        elif isinstance(value, str) and len(value) > 100:
+            sanitized[key] = f"{value[:50]}...[truncated]"
+        else:
+            sanitized[key] = value
+    return str(sanitized)
+
 
 class RateLimiter:
     """Token bucket rate limiter for API requests.
@@ -277,7 +304,7 @@ class JiraClient:
             JiraError: If the request fails.
         """
         await self._rate_limiter.acquire()
-        logger.debug("GET %s params=%s", path, params)
+        logger.debug("GET %s params=%s", path, _sanitize_params_for_logging(params))
         response = await self.client.get(path, params=params)
         if not response.is_success:
             self._handle_error(response)
