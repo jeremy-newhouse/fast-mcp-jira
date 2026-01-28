@@ -309,6 +309,40 @@ class JiraClient:
             self._handle_error(response)
         return response.json() if response.content else {}
 
+    async def post_raw(
+        self,
+        path: str,
+        content: str,
+        content_type: str = "application/json",
+    ) -> dict[str, Any]:
+        """Make a POST request with raw string content.
+
+        Used for APIs that require non-JSON body formats (e.g., watchers API
+        which expects a quoted account ID string).
+
+        Args:
+            path: API endpoint path.
+            content: Raw string content to send as body.
+            content_type: Content-Type header value.
+
+        Returns:
+            Parsed JSON response (empty dict if no content).
+
+        Raises:
+            JiraError: If the request fails.
+        """
+        await self._rate_limiter.acquire()
+        logger.debug("POST raw %s", path)
+
+        response = await self.client.post(
+            path,
+            content=content,
+            headers={"Content-Type": content_type},
+        )
+        if not response.is_success:
+            self._handle_error(response)
+        return response.json() if response.content else {}
+
     async def put(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a PUT request to JIRA API.
 

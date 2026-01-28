@@ -1,11 +1,26 @@
-"""Project tools for JIRA."""
+"""Project tools for JIRA.
+
+This module provides tools for managing JIRA projects:
+- get_projects: List all projects
+- get_project: Get project details
+- get_components: Get project components
+- get_versions: Get project versions/releases
+
+Security Features:
+- Project keys are validated against JIRA format
+
+Caching:
+- Projects, components, and versions are cached for 6 hours
+"""
 
 from typing import Annotated, Any
 
 from pydantic import Field
 
-from ..server import jira, mcp
+from ..server import cache, jira, mcp
+from ..services.cache import CacheService
 from ..services.jira_client import JiraError
+from ..utils.validation import ValidationError, validate_project_key
 
 
 @mcp.tool(description="List all JIRA projects.")
@@ -19,7 +34,23 @@ async def get_projects(
         Field(description="Comma-separated list of expansions (e.g., description,lead,issueTypes)"),
     ] = None,
 ) -> dict[str, Any]:
-    """Get list of all projects."""
+    """Get list of all projects.
+
+    Results are cached for 6 hours. Use invalidate_cache to force refresh.
+    """
+    # Create cache key from params
+    params_hash = CacheService.hash_params(
+        {"max_results": max_results, "start_at": start_at, "expand": expand}
+    )
+    cache_key = CacheService.make_key("projects", params_hash)
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "projects")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         params: dict[str, Any] = {
             "maxResults": max_results,
@@ -42,7 +73,7 @@ async def get_projects(
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": result.get("total"),
             "start_at": result.get("startAt"),
@@ -50,6 +81,12 @@ async def get_projects(
             "is_last": result.get("isLast", True),
             "projects": projects,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "projects", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -64,11 +101,27 @@ async def get_project(
         Field(description="Comma-separated list of expansions (e.g., description,lead,issueTypes)"),
     ] = None,
 ) -> dict[str, Any]:
-    """Get project details by key."""
+    """Get project details by key.
+
+    Results are cached for 6 hours. Use invalidate_cache to force refresh.
+    """
     try:
+        project_key = validate_project_key(project_key)
+
+        # Create cache key
+        params_hash = CacheService.hash_params({"expand": expand}) if expand else "default"
+        cache_key = CacheService.make_key("project", project_key, params_hash)
+
+        # Try cache first
+        if cache:
+            cached = await cache.get(cache_key, "project")
+            if cached:
+                cached["_cached"] = True
+                return cached
+
         params = {"expand": expand} if expand else None
         result = await jira.get(f"/rest/api/3/project/{project_key}", params=params)
-        return {
+        response = {
             "success": True,
             "project": {
                 "id": result.get("id"),
@@ -84,6 +137,14 @@ async def get_project(
                 ],
             },
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "project", response)
+
+        return response
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -94,8 +155,23 @@ async def get_project(
 async def get_components(
     project_key: Annotated[str, Field(description="Project key (e.g., PROJ)")],
 ) -> dict[str, Any]:
-    """Get list of components for a project."""
+    """Get list of components for a project.
+
+    Results are cached for 6 hours. Use invalidate_cache to force refresh.
+    """
     try:
+        project_key = validate_project_key(project_key)
+
+        # Create cache key
+        cache_key = CacheService.make_key("components", project_key)
+
+        # Try cache first
+        if cache:
+            cached = await cache.get(cache_key, "components")
+            if cached:
+                cached["_cached"] = True
+                return cached
+
         result = await jira.get(f"/rest/api/3/project/{project_key}/components")
         components = []
         for c in result if isinstance(result, list) else []:
@@ -109,12 +185,20 @@ async def get_components(
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "project_key": project_key,
             "total": len(components),
             "components": components,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "components", response)
+
+        return response
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -133,8 +217,26 @@ async def get_versions(
         Field(description="Order by field (e.g., 'name', '-releaseDate' for descending)"),
     ] = None,
 ) -> dict[str, Any]:
-    """Get list of versions/releases for a project."""
+    """Get list of versions/releases for a project.
+
+    Results are cached for 6 hours. Use invalidate_cache to force refresh.
+    """
     try:
+        project_key = validate_project_key(project_key)
+
+        # Create cache key
+        params_hash = CacheService.hash_params(
+            {"max_results": max_results, "start_at": start_at, "order_by": order_by}
+        )
+        cache_key = CacheService.make_key("versions", project_key, params_hash)
+
+        # Try cache first
+        if cache:
+            cached = await cache.get(cache_key, "versions")
+            if cached:
+                cached["_cached"] = True
+                return cached
+
         params: dict[str, Any] = {
             "maxResults": max_results,
             "startAt": start_at,
@@ -157,7 +259,7 @@ async def get_versions(
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "project_key": project_key,
             "total": result.get("total"),
@@ -166,6 +268,14 @@ async def get_versions(
             "is_last": result.get("isLast", True),
             "versions": versions,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "versions", response)
+
+        return response
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

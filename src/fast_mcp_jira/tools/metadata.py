@@ -1,16 +1,40 @@
-"""Metadata tools for JIRA (issue types, priorities, statuses, users, fields)."""
+"""Metadata tools for JIRA (issue types, priorities, statuses, users, fields).
+
+These tools retrieve JIRA system metadata. Results are cached for performance
+since metadata rarely changes.
+
+Cached entities and TTLs:
+- issue_types: 24 hours
+- priorities: 24 hours
+- statuses: 24 hours
+- fields: 24 hours
+- users: 1 hour (search results)
+"""
 
 from typing import Annotated, Any
 
 from pydantic import Field
 
-from ..server import jira, mcp
+from ..server import cache, jira, mcp
+from ..services.cache import CacheService
 from ..services.jira_client import JiraError
 
 
 @mcp.tool(description="Get all issue types available in JIRA.")
 async def get_issue_types() -> dict[str, Any]:
-    """Get list of all issue types."""
+    """Get list of all issue types.
+
+    Results are cached for 24 hours. Use invalidate_cache to force refresh.
+    """
+    cache_key = CacheService.make_key("issue_types")
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "issue_types")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         result = await jira.get("/rest/api/3/issuetype")
         issue_types = []
@@ -25,11 +49,17 @@ async def get_issue_types() -> dict[str, Any]:
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": len(issue_types),
             "issue_types": issue_types,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "issue_types", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -38,7 +68,19 @@ async def get_issue_types() -> dict[str, Any]:
 
 @mcp.tool(description="Get all priority levels available in JIRA.")
 async def get_priorities() -> dict[str, Any]:
-    """Get list of all priority levels."""
+    """Get list of all priority levels.
+
+    Results are cached for 24 hours. Use invalidate_cache to force refresh.
+    """
+    cache_key = CacheService.make_key("priorities")
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "priorities")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         result = await jira.get("/rest/api/3/priority")
         priorities = []
@@ -52,11 +94,17 @@ async def get_priorities() -> dict[str, Any]:
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": len(priorities),
             "priorities": priorities,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "priorities", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -65,7 +113,19 @@ async def get_priorities() -> dict[str, Any]:
 
 @mcp.tool(description="Get all workflow statuses available in JIRA.")
 async def get_statuses() -> dict[str, Any]:
-    """Get list of all workflow statuses."""
+    """Get list of all workflow statuses.
+
+    Results are cached for 24 hours. Use invalidate_cache to force refresh.
+    """
+    cache_key = CacheService.make_key("statuses")
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "statuses")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         result = await jira.get("/rest/api/3/status")
         statuses = []
@@ -80,11 +140,17 @@ async def get_statuses() -> dict[str, Any]:
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": len(statuses),
             "statuses": statuses,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "statuses", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -99,7 +165,23 @@ async def search_users(
     ] = 50,
     start_at: Annotated[int, Field(description="Index of the first user to return", ge=0)] = 0,
 ) -> dict[str, Any]:
-    """Search for users by name, email, or username."""
+    """Search for users by name, email, or username.
+
+    Results are cached for 1 hour per unique query. Use invalidate_cache to force refresh.
+    """
+    # Create cache key from query params
+    params_hash = CacheService.hash_params(
+        {"query": query, "max_results": max_results, "start_at": start_at}
+    )
+    cache_key = CacheService.make_key("users", params_hash)
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "users")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         params = {
             "query": query,
@@ -119,11 +201,17 @@ async def search_users(
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": len(users),
             "users": users,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "users", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -132,7 +220,19 @@ async def search_users(
 
 @mcp.tool(description="Get all available fields in JIRA.")
 async def get_fields() -> dict[str, Any]:
-    """Get list of all fields (system and custom)."""
+    """Get list of all fields (system and custom).
+
+    Results are cached for 24 hours. Use invalidate_cache to force refresh.
+    """
+    cache_key = CacheService.make_key("fields")
+
+    # Try cache first
+    if cache:
+        cached = await cache.get(cache_key, "fields")
+        if cached:
+            cached["_cached"] = True
+            return cached
+
     try:
         result = await jira.get("/rest/api/3/field")
         fields = []
@@ -149,11 +249,17 @@ async def get_fields() -> dict[str, Any]:
                 }
             )
 
-        return {
+        response = {
             "success": True,
             "total": len(fields),
             "fields": fields,
         }
+
+        # Cache the response
+        if cache:
+            await cache.set(cache_key, "fields", response)
+
+        return response
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

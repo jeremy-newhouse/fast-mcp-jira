@@ -1,13 +1,24 @@
-"""Worklog tools for JIRA time tracking."""
+"""Worklog tools for JIRA time tracking.
+
+This module provides tools for managing time tracking on JIRA issues:
+- add_worklog: Log time spent on an issue
+- get_worklogs: Get all worklogs for an issue
+- delete_worklog: Delete a worklog entry
+
+Security Features:
+- Issue keys are validated against JIRA format
+- Worklog IDs are validated as numeric
+"""
 
 from typing import Annotated, Any
 
 from pydantic import Field
+from pydantic import ValidationError as PydanticValidationError
 
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.adf import extract_text_from_adf, markdown_to_adf
-from ..utils.validation import ValidationError, validate_issue_key
+from ..utils.validation import NumericIdInput, ValidationError, validate_issue_key
 
 
 @mcp.tool(description="Log time spent on a JIRA issue.")
@@ -120,15 +131,18 @@ async def delete_worklog(
     """Delete a worklog entry from an issue."""
     try:
         issue_key = validate_issue_key(issue_key)
+        validated_id = NumericIdInput(id=worklog_id)
 
-        await jira.delete(f"/rest/api/3/issue/{issue_key}/worklog/{worklog_id}")
+        await jira.delete(f"/rest/api/3/issue/{issue_key}/worklog/{validated_id.id}")
         return {
             "success": True,
-            "deleted_worklog_id": worklog_id,
+            "deleted_worklog_id": validated_id.id,
             "issue_key": issue_key,
         }
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "worklog_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

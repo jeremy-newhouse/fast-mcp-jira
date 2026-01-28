@@ -67,3 +67,7 @@ Thumbs.db
 
 # Project specific
 tmp/
+
+# Claude
+CLAUDE.md
+CONTEXT.md

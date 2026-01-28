@@ -1,6 +1,6 @@
-# Fast MCP JIRA - Claude Code Skill Guide
+# Fast MCP JIRA - User Guide
 
-This guide provides comprehensive documentation for using the Fast MCP JIRA tools with Claude Code.
+This guide provides comprehensive documentation for using the Fast MCP JIRA tools (47 tools available).
 
 ## Quick Reference
 
@@ -321,6 +321,103 @@ get_sprint_issues(
 
 ---
 
+#### create_sprint
+
+Create a new sprint on a Scrum board.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| board_id | Yes | Board ID (Scrum boards only) |
+| name | Yes | Sprint name |
+| start_date | No | ISO 8601 date (e.g., "2024-01-15") |
+| end_date | No | ISO 8601 date |
+| goal | No | Sprint goal description |
+
+**Example:**
+```
+create_sprint(
+    board_id=42,
+    name="Sprint 16",
+    start_date="2024-02-01",
+    end_date="2024-02-14",
+    goal="Complete user authentication feature"
+)
+```
+
+---
+
+#### start_sprint
+
+Start a future sprint (activates it).
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| sprint_id | Yes | Sprint ID |
+| start_date | No | Override start date |
+| end_date | No | Override end date |
+
+**Example:**
+```
+start_sprint(sprint_id=123, start_date="2024-02-01", end_date="2024-02-14")
+```
+
+---
+
+#### complete_sprint
+
+Complete an active sprint.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| sprint_id | Yes | Sprint ID |
+
+**Example:**
+```
+complete_sprint(sprint_id=123)
+```
+
+---
+
+#### move_issues_to_sprint
+
+Move issues to a sprint or backlog.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| sprint_id | Yes | Sprint ID (use 0 for backlog) |
+| issue_keys | Yes | List of issue keys to move |
+
+**Example:**
+```
+# Move to sprint
+move_issues_to_sprint(sprint_id=123, issue_keys=["PROJ-1", "PROJ-2", "PROJ-3"])
+
+# Move to backlog
+move_issues_to_sprint(sprint_id=0, issue_keys=["PROJ-4"])
+```
+
+---
+
+#### delete_sprint
+
+Delete a sprint (issues return to backlog).
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| sprint_id | Yes | Sprint ID |
+
+**Example:**
+```
+delete_sprint(sprint_id=123)
+```
+
+---
+
 ### Issue Links
 
 #### create_link
@@ -341,6 +438,137 @@ create_link(
     outward_issue="PROJ-456",
     link_type="Blocks"
 )
+```
+
+---
+
+### Bulk Operations
+
+#### bulk_update_issues
+
+Update multiple issues at once with the same field values.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| issue_keys | Yes | List of issue keys (max 100) |
+| updates | Yes | Field updates to apply to all issues |
+
+**Example:**
+```
+bulk_update_issues(
+    issue_keys=["PROJ-1", "PROJ-2", "PROJ-3"],
+    updates={
+        "priority": {"name": "High"},
+        "labels": ["urgent", "review"]
+    }
+)
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "total": 3,
+    "updated": 3,
+    "failed": 0,
+    "results": [
+        {"issue_key": "PROJ-1", "success": true},
+        {"issue_key": "PROJ-2", "success": true},
+        {"issue_key": "PROJ-3", "success": true}
+    ]
+}
+```
+
+---
+
+#### bulk_transition_issues
+
+Transition multiple issues to a new status.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| issue_keys | Yes | List of issue keys (max 100) |
+| transition_name | Yes | Target status name (e.g., "Done") |
+
+**Example:**
+```
+bulk_transition_issues(
+    issue_keys=["PROJ-1", "PROJ-2", "PROJ-3"],
+    transition_name="Done"
+)
+```
+
+---
+
+#### bulk_add_comments
+
+Add the same comment to multiple issues.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| issue_keys | Yes | List of issue keys (max 100) |
+| body | Yes | Comment text (supports markdown) |
+
+**Example:**
+```
+bulk_add_comments(
+    issue_keys=["PROJ-1", "PROJ-2", "PROJ-3"],
+    body="Deployed in release v1.2.0"
+)
+```
+
+---
+
+### Cache Management
+
+The server caches JIRA metadata (issue types, priorities, projects, boards) to improve performance. Cache entries have configurable TTLs.
+
+#### get_cache_stats
+
+Get cache statistics including hit rates.
+
+**Example:**
+```
+get_cache_stats()
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "enabled": true,
+    "entries": {"total": 150, "valid": 142, "expired": 8},
+    "overall": {"hits": 500, "misses": 50, "hit_rate": 90.91},
+    "by_entity_type": {
+        "issue_types": {"hits": 100, "misses": 1, "hit_rate": 99.01},
+        "projects": {"hits": 200, "misses": 10, "hit_rate": 95.24}
+    }
+}
+```
+
+---
+
+#### invalidate_cache
+
+Clear cache entries manually.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| entity_type | No | Clear specific type (e.g., "projects", "boards") |
+| cache_key | No | Clear specific key |
+| invalidate_all | No | Clear entire cache (default: false) |
+
+**Example:**
+```
+# Clear all project data
+invalidate_cache(entity_type="projects")
+
+# Clear entire cache
+invalidate_cache(invalidate_all=True)
 ```
 
 ---
@@ -412,6 +640,42 @@ get_sprint_issues(
 )
 ```
 
+### Sprint Planning
+
+```
+# View future sprints
+get_sprints(board_id=42, state="future")
+
+# Get backlog items (not in any sprint)
+search_issues(jql="project = PROJ AND sprint is EMPTY AND status != Done")
+```
+
+### Sprint Review (End of Sprint)
+
+```
+# Get completed issues
+get_sprint_issues(sprint_id=123, jql="status = Done")
+
+# Get incomplete issues (carryover)
+get_sprint_issues(sprint_id=123, jql="status != Done")
+
+# View closed sprints for velocity
+get_sprints(board_id=42, state="closed")
+```
+
+### Daily Standup Queries
+
+```
+# My in-progress work
+search_issues(jql="assignee = currentUser() AND status = 'In Progress'")
+
+# Blocked issues in sprint
+get_sprint_issues(sprint_id=123, jql="status = Blocked")
+
+# What changed today
+search_issues(jql="project = PROJ AND updated >= startOfDay()")
+```
+
 ---
 
 ### Bulk Issue Query Examples
@@ -481,8 +745,27 @@ All tools return a consistent response structure:
 ```
 
 Common errors:
-- `status_code: 401` - Invalid credentials
+- `status_code: 401` - Invalid credentials or API key
 - `status_code: 403` - Permission denied
 - `status_code: 404` - Issue/resource not found
 - `field: "jql"` - Invalid JQL syntax
 - `field: "filename"` - Invalid filename (path traversal blocked)
+
+---
+
+## Authentication
+
+### MCP Endpoint Authentication
+
+When `MCP_API_KEY` is configured on the server, clients must include the API key:
+
+```
+Authorization: Bearer your-api-key
+```
+
+### JIRA Authentication
+
+The server uses JIRA Cloud API tokens for authentication. Configure in `.env`:
+- `JIRA_URL`: Your Atlassian domain (e.g., `mycompany.atlassian.net`)
+- `JIRA_EMAIL`: Your Atlassian account email
+- `JIRA_API_TOKEN`: API token from [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens)

@@ -1,4 +1,14 @@
-"""Watcher tools for JIRA issues."""
+"""Watcher tools for JIRA issues.
+
+This module provides tools for managing issue watchers:
+- get_watchers: List all users watching an issue
+- add_watcher: Add a user as a watcher
+- remove_watcher: Remove a user from watching
+
+Security Features:
+- Issue keys are validated against JIRA format
+- Account IDs are validated for proper format
+"""
 
 from typing import Annotated, Any
 
@@ -6,6 +16,7 @@ from pydantic import Field
 
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
+from ..utils.validation import ValidationError, validate_account_id, validate_issue_key
 
 
 @mcp.tool(description="Get all watchers of a JIRA issue.")
@@ -14,6 +25,8 @@ async def get_watchers(
 ) -> dict[str, Any]:
     """Get list of users watching an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
+
         result = await jira.get(f"/rest/api/3/issue/{issue_key}/watchers")
         watchers = []
         for w in result.get("watchers", []):
@@ -33,6 +46,8 @@ async def get_watchers(
             "is_watching": result.get("isWatching", False),
             "watchers": watchers,
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -46,35 +61,22 @@ async def add_watcher(
 ) -> dict[str, Any]:
     """Add a user as a watcher to an issue."""
     try:
-        # The API expects the account ID as a quoted JSON string in the body
-        # We use the raw post with the account_id wrapped in quotes
-        import httpx
+        issue_key = validate_issue_key(issue_key)
+        account_id = validate_account_id(account_id, "account_id")
 
-        headers = {
-            "Authorization": jira._get_auth_header(),
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        async with httpx.AsyncClient(
-            base_url=jira.settings.base_url,
-            verify=jira.settings.jira_ssl_verify,
-            timeout=30.0,
-        ) as client:
-            response = await client.post(
-                f"/rest/api/3/issue/{issue_key}/watchers",
-                content=f'"{account_id}"',  # Raw JSON string
-                headers=headers,
-            )
-        if not response.is_success:
-            raise JiraError(
-                message=f"JIRA API error ({response.status_code}): {response.text}",
-                status_code=response.status_code,
-            )
+        # The API expects the account ID as a quoted JSON string in the body
+        # Use post_raw to send raw content while respecting rate limiter
+        await jira.post_raw(
+            f"/rest/api/3/issue/{issue_key}/watchers",
+            content=f'"{account_id}"',  # Raw JSON string
+        )
         return {
             "success": True,
             "issue_key": issue_key,
             "added_watcher": account_id,
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -88,6 +90,9 @@ async def remove_watcher(
 ) -> dict[str, Any]:
     """Remove a user from watching an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
+        account_id = validate_account_id(account_id, "account_id")
+
         await jira.delete(
             f"/rest/api/3/issue/{issue_key}/watchers",
             params={"accountId": account_id},
@@ -97,6 +102,8 @@ async def remove_watcher(
             "issue_key": issue_key,
             "removed_watcher": account_id,
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

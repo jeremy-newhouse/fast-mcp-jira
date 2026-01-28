@@ -5,6 +5,9 @@ A Fast MCP server for Atlassian JIRA Cloud using Streamable HTTP transport.
 ## Features
 
 - **47 MCP tools** covering all major JIRA operations
+- **SQLite caching** for metadata with configurable TTLs
+- **Bulk operations** for updating multiple issues at once
+- **Sprint management** - create, start, complete, and delete sprints
 - **Markdown support** in descriptions and comments (bullet lists, checklists, code blocks, bold/italic)
 - **Input validation** with clear error messages
 - **Pagination** for large result sets
@@ -37,9 +40,64 @@ cp .env.example .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JIRA_SSL_VERIFY` | `true` | SSL certificate verification |
-| `HOST` | `0.0.0.0` | Server bind address |
+| `HOST` | `127.0.0.1` | Server bind address |
 | `PORT` | `5472` | Server port (JIRA on phone keypad) |
 | `LOG_LEVEL` | `INFO` | Logging level |
+| `LOG_FORMAT` | `console` | Log format: `console` or `json` |
+| `MCP_API_KEY` | (none) | API key for endpoint authentication |
+| `CACHE_ENABLED` | `true` | Enable SQLite caching |
+| `CACHE_DB_PATH` | `~/.fast-mcp-jira/cache.db` | Cache database location |
+| `CACHE_TTL_METADATA` | `86400` | Metadata cache TTL (24h) |
+| `CACHE_TTL_PROJECTS` | `21600` | Projects cache TTL (6h) |
+| `CACHE_TTL_AGILE` | `1800` | Boards/sprints cache TTL (30m) |
+
+## Security
+
+### API Key Authentication
+
+When `MCP_API_KEY` is set, all MCP requests must include the key in the Authorization header:
+
+```
+Authorization: Bearer your-api-key
+```
+
+#### Generating a Secure API Key
+
+Generate a cryptographically secure API key using one of these methods:
+
+```bash
+# Using openssl (recommended)
+openssl rand -base64 32
+
+# Using Python
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Using uuidgen
+uuidgen | tr -d '-'
+```
+
+Add the generated key to your `.env` file:
+
+```bash
+MCP_API_KEY=your-generated-key-here
+```
+
+Leave `MCP_API_KEY` unset for unauthenticated access (suitable for local development only).
+
+### Input Validation
+
+All tools validate inputs before sending to JIRA:
+- Issue keys must match format `PROJECT-123`
+- Project keys are validated (uppercase, max 10 chars)
+- JQL queries are checked for injection patterns
+- Filenames are validated against path traversal and dangerous extensions
+- Numeric IDs are validated
+
+### Rate Limiting
+
+Built-in rate limiting protects against API abuse:
+- Default: 10 requests/second with burst of 20
+- Configurable via `RATE_LIMIT_PER_SECOND` and `RATE_LIMIT_BURST`
 
 ## Running
 
@@ -51,8 +109,13 @@ The MCP server will be available at `http://localhost:5472/mcp`
 
 ## Claude Code Integration
 
-To use this MCP server with Claude Code, create a `.mcp.json` file in your project root:
+To use this MCP server with Claude Code:
 
+### 1. Configure MCP Server
+
+Create a `.mcp.json` file in your project root. Use the included `.mcp.json` as a template:
+
+**Without authentication** (local development):
 ```json
 {
   "mcpServers": {
@@ -64,20 +127,45 @@ To use this MCP server with Claude Code, create a `.mcp.json` file in your proje
 }
 ```
 
-Then start the server and Claude Code will automatically connect to it.
+**With authentication** (recommended for shared environments):
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "type": "http",
+      "url": "http://localhost:5472/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+The `${MCP_API_KEY}` syntax references the environment variable, keeping your API key out of version control.
+
+### 2. Install the /jira Skill (Optional)
+
+Copy the skill to your Claude Code skills directory for the `/jira` command:
+
+```bash
+mkdir -p ~/.claude/skills/jira
+cp .claude/skills/jira/SKILL.md ~/.claude/skills/jira/
+```
+
+Then use `/jira` to invoke the skill directly.
+
+### 3. Start the Server
+
+```bash
+uv run python -m fast_mcp_jira
+```
+
+Claude Code will automatically connect to the MCP server.
+
+See [JIRA_USER_GUIDE.md](JIRA_USER_GUIDE.md) for detailed tool documentation and examples.
 
 ## Available Tools (47 total)
-
-### Generic HTTP Tools (5)
-Low-level tools for direct JIRA API access:
-
-| Tool | Description |
-|------|-------------|
-| `jira_get` | Make GET requests to any JIRA API endpoint |
-| `jira_post` | Make POST requests with JSON body |
-| `jira_put` | Make PUT requests for full resource updates |
-| `jira_patch` | Make PATCH requests (limited JIRA support) |
-| `jira_delete` | Make DELETE requests |
 
 ### Issue Tools (8)
 Create, read, update, delete, and transition issues:
@@ -118,7 +206,7 @@ Create, read, update, delete, and transition issues:
 | `get_attachment` | Get attachment metadata |
 | `delete_attachment` | Delete an attachment |
 
-### Agile Tools (4)
+### Agile Tools (10)
 
 | Tool | Description |
 |------|-------------|
@@ -126,6 +214,12 @@ Create, read, update, delete, and transition issues:
 | `get_board` | Get board details |
 | `get_sprints` | Get sprints for a board |
 | `get_sprint_issues` | Get issues in a sprint |
+| `create_sprint` | Create a new sprint on a Scrum board |
+| `update_sprint` | Update sprint name, dates, goal, or state |
+| `start_sprint` | Start a future sprint |
+| `complete_sprint` | Complete an active sprint |
+| `move_issues_to_sprint` | Move issues to a sprint or backlog |
+| `delete_sprint` | Delete a sprint |
 
 ### Project Tools (4)
 
@@ -161,6 +255,21 @@ Create, read, update, delete, and transition issues:
 | `get_statuses` | Get all workflow statuses |
 | `search_users` | Search for users |
 | `get_fields` | Get all available fields |
+
+### Bulk Operations (3)
+
+| Tool | Description |
+|------|-------------|
+| `bulk_update_issues` | Update multiple issues with the same field values |
+| `bulk_transition_issues` | Transition multiple issues to a new status |
+| `bulk_add_comments` | Add the same comment to multiple issues |
+
+### Cache Management (2)
+
+| Tool | Description |
+|------|-------------|
+| `get_cache_stats` | Get cache statistics and hit rates |
+| `invalidate_cache` | Clear cache entries by type or entirely |
 
 ## Markdown Support
 
@@ -241,15 +350,20 @@ Invalid inputs return clear error messages:
 src/fast_mcp_jira/
 ├── __init__.py
 ├── __main__.py          # Entry point
+├── auth.py              # API key authentication
 ├── config.py            # Settings from environment
+├── errors.py            # Standardized error types
+├── logging_config.py    # Structured logging configuration
 ├── server.py            # FastMCP server instance
 ├── services/
-│   └── jira_client.py   # Async HTTP client
+│   ├── cache.py         # SQLite cache with TTL expiration
+│   └── jira_client.py   # Async HTTP client with rate limiting
 ├── tools/
-│   ├── agile.py         # Boards, sprints
+│   ├── agile.py         # Boards, sprints, sprint management
 │   ├── attachments.py   # File attachments
+│   ├── bulk.py          # Bulk operations
+│   ├── cache.py         # Cache management tools
 │   ├── comments.py      # Issue comments
-│   ├── generic.py       # Raw HTTP methods
 │   ├── issues.py        # Issue CRUD
 │   ├── links.py         # Issue links
 │   ├── metadata.py      # Types, priorities, statuses
