@@ -49,6 +49,14 @@ This skill provides access to 47 JIRA tools via MCP. Use the `mcp__jira__*` tool
 3. mcp__jira__transition_issue(issue_key="PROJ-123", transition_name="Done")
 ```
 
+### Add label (preserving existing)
+```
+# Labels are replaced, not appended - fetch existing first
+1. mcp__jira__get_issue(issue_key="PROJ-123", fields="labels")
+2. # Extract labels from response.fields.labels, add your new label
+3. mcp__jira__update_issue(issue_key="PROJ-123", labels=["existing1", "existing2", "new-label"])
+```
+
 ### Sprint Planning
 ```
 # Find your board
