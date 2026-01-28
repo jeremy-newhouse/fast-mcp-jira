@@ -119,6 +119,27 @@ def _create_text_node(text: str, marks: list[dict] | None = None) -> dict[str, A
     return node
 
 
+def _create_mention_node(account_id: str, display_name: str | None = None) -> dict[str, Any]:
+    """Create an ADF mention node for @mentioning a user.
+
+    Args:
+        account_id: The Atlassian account ID of the user to mention.
+        display_name: Optional display name (shown as @DisplayName).
+
+    Returns:
+        ADF mention node structure.
+    """
+    node: dict[str, Any] = {
+        "type": "mention",
+        "attrs": {
+            "id": account_id,
+        },
+    }
+    if display_name:
+        node["attrs"]["text"] = f"@{display_name}"
+    return node
+
+
 def _create_paragraph(content: list[dict]) -> dict[str, Any]:
     """Create an ADF paragraph node."""
     return {"type": "paragraph", "content": content}
@@ -182,9 +203,13 @@ def _create_heading(level: int, content: list[dict]) -> dict[str, Any]:
 
 
 def _parse_inline_formatting(text: str) -> list[dict]:
-    """Parse inline formatting (bold, italic, code) in text.
+    """Parse inline formatting (bold, italic, code, mentions) in text.
 
-    Returns a list of ADF text nodes with appropriate marks.
+    Returns a list of ADF nodes (text nodes with marks, or mention nodes).
+
+    Supported mention syntax:
+    - [~accountId:ID] - mention by account ID
+    - [~accountId:ID|Display Name] - mention with display name
     """
     if not text:
         return []
@@ -192,9 +217,10 @@ def _parse_inline_formatting(text: str) -> list[dict]:
     nodes: list[dict] = []
     current_pos = 0
 
-    # Pattern for inline formatting
-    # Matches: `code`, **bold**, *italic*, _italic_
+    # Pattern for inline formatting including mentions
+    # Matches: `code`, **bold**, *italic*, _italic_, [~accountId:...]
     pattern = re.compile(
+        r"(\[~accountId:([^\]|]+)(?:\|([^\]]+))?\])|"  # mention [~accountId:ID] or [~accountId:ID|Name]
         r"(`[^`]+`)|"  # inline code
         r"(\*\*[^*]+\*\*)|"  # bold
         r"(\*[^*]+\*)|"  # italic with *
@@ -215,6 +241,14 @@ def _parse_inline_formatting(text: str) -> list[dict]:
             plain_text = text[current_pos : match.start()]
             if plain_text:
                 nodes.append(_create_text_node(plain_text))
+
+        # Check if this is a mention
+        if match.group(1):  # Mention pattern matched
+            account_id = match.group(2)
+            display_name = match.group(3)  # May be None
+            nodes.append(_create_mention_node(account_id, display_name))
+            current_pos = match.end()
+            continue
 
         matched = match.group()
 
