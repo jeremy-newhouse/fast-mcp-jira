@@ -53,6 +53,9 @@ cp .env.example .env
 | `CACHE_ENCRYPTION_ENABLED` | `false` | Enable SQLCipher cache encryption |
 | `CACHE_ENCRYPTION_KEY` | (none) | Encryption key (min 32 chars) |
 | `CACHE_ENCRYPTION_KEY_FILE` | (none) | Path to file containing encryption key |
+| `CUSTOM_FIELDS_ENABLED` | `false` | Enable custom field tools |
+| `CUSTOM_FIELDS_CONFIG_FILE` | `~/.fast-mcp-jira/custom-fields.json` | Custom fields config |
+| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30` | Shutdown timeout in seconds |
 
 ## Security
 
@@ -327,6 +330,49 @@ Create, read, update, delete, and transition issues:
 |------|-------------|
 | `get_cache_stats` | Get cache statistics and hit rates |
 | `invalidate_cache` | Clear cache entries by type or entirely |
+
+## Custom Fields
+
+Configure custom JIRA fields to generate dedicated MCP tools. Each field creates `get_<name>` and `set_<name>` tools.
+
+### Configuration
+
+1. Create `~/.fast-mcp-jira/custom-fields.json`:
+```json
+{
+  "custom_fields": [
+    {
+      "id": "customfield_10300",
+      "name": "acceptance_criteria",
+      "type": "rich_text",
+      "label": "Acceptance Criteria",
+      "description": "Acceptance criteria (supports markdown)",
+      "enabled": true
+    }
+  ]
+}
+```
+
+2. Enable in `.env`:
+```bash
+CUSTOM_FIELDS_ENABLED=true
+```
+
+### Supported Field Types
+
+| Type | Description | JIRA Format |
+|------|-------------|-------------|
+| `text` | Plain text | String |
+| `rich_text` | Markdown (converts to ADF) | ADF document |
+| `number` | Integer or decimal | Number |
+| `date` | Date (YYYY-MM-DD) | String |
+| `datetime` | ISO 8601 datetime | String |
+| `select` | Single select | `{"value": "..."}` |
+| `multi_select` | Multiple selection | `[{"value": "..."}]` |
+| `checkbox` | Boolean | Boolean |
+| `user_picker` | User (account ID) | `{"accountId": "..."}` |
+
+See `custom-fields.example.json` for a complete example.
 
 ## Markdown Support
 

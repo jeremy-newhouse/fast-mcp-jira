@@ -650,9 +650,7 @@ def adf_to_markdown(adf: dict[str, Any] | None) -> str:
             for cell in cells:
                 cell_type = cell.get("type", "")
                 # Extract text from cell content
-                cell_content = "".join(
-                    process_node(c) for c in cell.get("content", [])
-                ).strip()
+                cell_content = "".join(process_node(c) for c in cell.get("content", [])).strip()
                 # Replace newlines with spaces for table cells
                 cell_content = cell_content.replace("\n", " ")
                 cell_texts.append(cell_content)
@@ -664,9 +662,7 @@ def adf_to_markdown(adf: dict[str, Any] | None) -> str:
             result_lines.append("| " + " | ".join(cell_texts) + " |")
 
             # Add separator after header row
-            if not header_done and any(
-                c.get("type") == "tableHeader" for c in cells
-            ):
+            if not header_done and any(c.get("type") == "tableHeader" for c in cells):
                 separator = "| " + " | ".join("---" for _ in cell_texts) + " |"
                 result_lines.append(separator)
                 header_done = True

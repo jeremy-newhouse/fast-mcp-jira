@@ -1,0 +1,41 @@
+{
+  "custom_fields": [
+    {
+      "id": "customfield_10300",
+      "name": "acceptance_criteria",
+      "type": "rich_text",
+      "label": "Acceptance Criteria",
+      "description": "Acceptance criteria for the story (supports markdown)",
+      "read_only": false,
+      "enabled": true
+    },
+    {
+      "id": "customfield_10006",
+      "name": "story_points",
+      "type": "number",
+      "label": "Story Points",
+      "description": "Story point estimate",
+      "read_only": false,
+      "enabled": true
+    },
+    {
+      "id": "customfield_10001",
+      "name": "sprint",
+      "type": "text",
+      "label": "Sprint",
+      "description": "Sprint assignment (read-only)",
+      "read_only": true,
+      "enabled": true
+    },
+    {
+      "id": "customfield_12345",
+      "name": "priority_level",
+      "type": "select",
+      "label": "Priority Level",
+      "description": "Custom priority classification",
+      "options": ["P0 - Critical", "P1 - High", "P2 - Medium", "P3 - Low"],
+      "read_only": false,
+      "enabled": false
+    }
+  ]
+}

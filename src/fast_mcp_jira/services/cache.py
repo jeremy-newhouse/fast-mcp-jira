@@ -615,16 +615,27 @@ class CacheService:
                 logger.warning("Periodic cleanup error", extra={"error": str(e)})
 
     async def close(self) -> None:
-        """Close database connection and cleanup."""
+        """Close database connection and cleanup.
+
+        Gracefully cancels background tasks with timeout and closes
+        the database connection.
+        """
+        # Cancel cleanup task with timeout
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
-                await self._cleanup_task
+                await asyncio.wait_for(self._cleanup_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Cache cleanup task did not cancel within timeout")
             except asyncio.CancelledError:
                 pass
 
+        # Close database connection with timeout
         if self._db:
-            await self._db.close()
+            try:
+                await asyncio.wait_for(self._db.close(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Database close exceeded timeout")
             self._db = None
             self._initialized = False
             logger.debug("Cache service closed")

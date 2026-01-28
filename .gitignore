@@ -78,3 +78,5 @@ cache.key
 # Claude
 CLAUDE.md
 CONTEXT.md
+# User config files
+custom-fields.json

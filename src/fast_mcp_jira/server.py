@@ -10,6 +10,8 @@ Global instances:
     mcp: FastMCP server instance
 """
 
+import time
+
 from fastmcp import FastMCP
 from fastmcp.server.lifespan import lifespan
 
@@ -52,12 +54,43 @@ async def app_lifespan(server: FastMCP) -> dict:
     try:
         yield {"cache": cache, "jira": jira}
     finally:
-        # Shutdown: cleanup services
-        logger.info("Shutting down JIRA MCP server services")
-        await jira.close()
+        # Shutdown: cleanup services with timing
+        logger.info("Shutdown initiated")
+        start_time = time.time()
+
+        # Close JIRA client
+        try:
+            await jira.close()
+            logger.info(
+                "JIRA client closed",
+                extra={"elapsed_ms": round((time.time() - start_time) * 1000, 2)},
+            )
+        except Exception as e:
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            logger.error(
+                "JIRA client close failed",
+                extra={"error": str(e), "elapsed_ms": elapsed_ms},
+            )
+
+        # Close cache service
         if cache:
-            await cache.close()
-        logger.info("Services shutdown complete")
+            try:
+                await cache.close()
+                logger.info(
+                    "Cache service closed",
+                    extra={"elapsed_ms": round((time.time() - start_time) * 1000, 2)},
+                )
+            except Exception as e:
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                logger.error(
+                    "Cache service close failed",
+                    extra={"error": str(e), "elapsed_ms": elapsed_ms},
+                )
+
+        logger.info(
+            "Shutdown complete",
+            extra={"total_ms": round((time.time() - start_time) * 1000, 2)},
+        )
 
 
 # Create FastMCP server
@@ -73,6 +106,14 @@ mcp = FastMCP(
     auth=auth_provider,
     lifespan=app_lifespan,
 )
+
+# Register custom field tools (if enabled)
+if settings.custom_fields_enabled:
+    from .tools.custom_fields import register_custom_field_tools
+
+    custom_fields = settings.load_custom_fields()
+    if custom_fields:
+        register_custom_field_tools(mcp, jira, custom_fields)
 
 
 # Import and register all tools

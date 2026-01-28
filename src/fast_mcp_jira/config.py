@@ -40,12 +40,76 @@ Bulk Operation Settings:
 
 import hashlib
 import ipaddress
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Supported custom field types
+FieldType = Literal[
+    "text",  # Free text input
+    "rich_text",  # ADF format (supports markdown)
+    "number",  # Integer/decimal
+    "date",  # YYYY-MM-DD format
+    "datetime",  # ISO 8601 datetime
+    "select",  # Single select dropdown
+    "multi_select",  # Multi-select dropdown
+    "checkbox",  # Boolean
+    "user_picker",  # Single user (account ID)
+]
+
+
+class CustomFieldConfig(BaseModel):
+    """Configuration for a custom JIRA field.
+
+    Each configured field generates get_<name> and set_<name> MCP tools.
+
+    Attributes:
+        id: JIRA field ID (e.g., customfield_10300)
+        name: Tool name in snake_case (e.g., acceptance_criteria)
+        type: Field data type
+        label: Human-readable label for documentation
+        description: Field description for MCP tool description
+        required: Whether field is required
+        read_only: If true, only generate getter tool
+        enabled: Whether to generate tools for this field
+        options: For select fields, list of valid options
+
+    Example:
+        {
+            "id": "customfield_10300",
+            "name": "acceptance_criteria",
+            "type": "rich_text",
+            "label": "Acceptance Criteria",
+            "description": "Acceptance criteria (supports markdown)",
+            "enabled": true
+        }
+    """
+
+    id: str = Field(..., pattern=r"^customfield_\d+$", description="JIRA custom field ID")
+    name: str = Field(..., pattern=r"^[a-z_][a-z0-9_]*$", description="Tool name (snake_case)")
+    type: FieldType
+    label: str = Field(..., max_length=100)
+    description: str = Field(..., max_length=500)
+    required: bool = False
+    read_only: bool = False
+    enabled: bool = True
+    options: list[str] | None = None  # For select fields
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_not_reserved(cls, v: str) -> str:
+        """Ensure field name doesn't conflict with existing tool names."""
+        reserved_prefixes = {"get_issue", "create_issue", "update_issue", "delete_issue"}
+        # Check for exact matches that would conflict
+        if v in reserved_prefixes:
+            raise ValueError(f"Field name '{v}' conflicts with reserved tool name")
+        return v
 
 
 def _is_private_or_internal_ip(hostname: str) -> bool:
@@ -153,6 +217,13 @@ class Settings(BaseSettings):
     # Bulk operation configuration
     bulk_max_batch_size: int = 100  # Maximum issues per bulk operation
     bulk_concurrent_requests: int = 10  # Concurrent requests for bulk ops
+
+    # Graceful shutdown configuration
+    graceful_shutdown_timeout: int = 30  # Seconds to wait for graceful shutdown
+
+    # Custom fields configuration
+    custom_fields_enabled: bool = False
+    custom_fields_config_file: str = "~/.fast-mcp-jira/custom-fields.json"
 
     @property
     def cache_db_full_path(self) -> Path:
@@ -269,6 +340,39 @@ class Settings(BaseSettings):
             "Cache encryption enabled but no key provided. "
             "Set CACHE_ENCRYPTION_KEY or CACHE_ENCRYPTION_KEY_FILE"
         )
+
+    def load_custom_fields(self) -> list[CustomFieldConfig]:
+        """Load custom fields configuration from JSON file.
+
+        Reads the custom fields configuration file and returns a list of
+        validated CustomFieldConfig objects.
+
+        Returns:
+            List of custom field configurations.
+
+        Raises:
+            FileNotFoundError: If config file doesn't exist (when enabled).
+            ValueError: If config file contains invalid JSON or field configs.
+        """
+        if not self.custom_fields_enabled:
+            return []
+
+        config_path = Path(os.path.expanduser(self.custom_fields_config_file))
+        if not config_path.exists():
+            # Return empty list if file doesn't exist
+            return []
+
+        try:
+            with open(config_path) as f:
+                data = json.load(f)
+
+            fields_data = data.get("custom_fields", [])
+            return [CustomFieldConfig(**field) for field in fields_data]
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in custom fields config: {e}") from e
+        except Exception as e:
+            raise ValueError(f"Error loading custom fields config: {e}") from e
 
 
 @lru_cache
