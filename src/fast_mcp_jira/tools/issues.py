@@ -60,6 +60,9 @@ async def create_issue(
     ] = None,
     labels: Annotated[list[str] | None, Field(description="List of labels to apply")] = None,
     assignee: Annotated[str | None, Field(description="Assignee account ID")] = None,
+    parent: Annotated[
+        str | None, Field(description="Parent issue key for subtasks (e.g., PROJ-123)")
+    ] = None,
 ) -> dict[str, Any]:
     """Create a new issue in JIRA."""
     try:
@@ -85,6 +88,10 @@ async def create_issue(
 
         if assignee:
             fields["assignee"] = {"accountId": assignee}
+
+        if parent:
+            parent = validate_issue_key(parent)
+            fields["parent"] = {"key": parent}
 
         result = await jira.post("/rest/api/3/issue", body={"fields": fields})
         return build_response(
@@ -245,6 +252,10 @@ async def update_issue(
     assignee: Annotated[
         str | None, Field(description="New assignee account ID (use empty string to unassign)")
     ] = None,
+    parent: Annotated[
+        str | None,
+        Field(description="Parent issue key (e.g., PROJ-123). Use empty string to remove parent."),
+    ] = None,
 ) -> dict[str, Any]:
     """Update issue fields."""
     try:
@@ -267,6 +278,13 @@ async def update_issue(
 
         if assignee is not None:
             fields["assignee"] = None if assignee == "" else {"accountId": assignee}
+
+        if parent is not None:
+            if parent == "":
+                fields["parent"] = None
+            else:
+                parent = validate_issue_key(parent)
+                fields["parent"] = {"key": parent}
 
         if not fields:
             return build_response(False, error="No fields to update")
