@@ -264,7 +264,7 @@ class CacheService:
                 AND jira_instance = ?
                 AND expires_at > ?
                 """,
-                (cache_key, self.settings.base_url, now),
+                (cache_key, self.settings.cache_partition_key, now),
             )
             row = await cursor.fetchone()
 
@@ -328,7 +328,7 @@ class CacheService:
                     json.dumps(value),
                     now,
                     expires_at,
-                    self.settings.base_url,
+                    self.settings.cache_partition_key,
                 ),
             )
             await self._db.commit()
@@ -371,23 +371,23 @@ class CacheService:
             if cache_key:
                 cursor = await self._db.execute(
                     "DELETE FROM cache WHERE cache_key = ? AND jira_instance = ?",
-                    (cache_key, self.settings.base_url),
+                    (cache_key, self.settings.cache_partition_key),
                 )
             elif entity_type:
                 cursor = await self._db.execute(
                     "DELETE FROM cache WHERE entity_type = ? AND jira_instance = ?",
-                    (entity_type, self.settings.base_url),
+                    (entity_type, self.settings.cache_partition_key),
                 )
             elif prefix:
                 cursor = await self._db.execute(
                     "DELETE FROM cache WHERE cache_key LIKE ? AND jira_instance = ?",
-                    (f"{prefix}%", self.settings.base_url),
+                    (f"{prefix}%", self.settings.cache_partition_key),
                 )
             else:
                 # Invalidate all for this instance
                 cursor = await self._db.execute(
                     "DELETE FROM cache WHERE jira_instance = ?",
-                    (self.settings.base_url,),
+                    (self.settings.cache_partition_key,),
                 )
 
             await self._db.commit()
@@ -464,7 +464,7 @@ class CacheService:
                     COUNT(DISTINCT entity_type) as entity_types
                 FROM cache WHERE jira_instance = ?
                 """,
-                (time.time(), self.settings.base_url),
+                (time.time(), self.settings.cache_partition_key),
             )
             counts = await cursor.fetchone()
 

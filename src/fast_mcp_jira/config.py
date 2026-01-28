@@ -33,6 +33,7 @@ Bulk Operation Settings:
     BULK_CONCURRENT_REQUESTS: Concurrent requests for bulk ops (default: 10)
 """
 
+import hashlib
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -141,6 +142,31 @@ class Settings(BaseSettings):
             url = f"{url}.atlassian.net"
 
         return url.rstrip("/")
+
+    @property
+    def cache_partition_key(self) -> str:
+        """Get cache partition key for isolating cache per user.
+
+        Combines JIRA URL with MCP API Key (if set) to ensure:
+        - Different JIRA instances have separate caches
+        - Different users (API keys) have separate caches
+        - Same user's cache persists across sessions
+
+        Returns:
+            A stable hash string identifying this user's cache partition.
+        """
+        # Include JIRA URL for instance isolation
+        key_parts = [self.base_url]
+
+        # Include MCP API Key for user isolation (if configured)
+        if self.mcp_api_key:
+            key_parts.append(self.mcp_api_key)
+        else:
+            # Fall back to JIRA credentials for user isolation
+            key_parts.append(self.jira_email)
+
+        combined = ":".join(key_parts)
+        return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
 
 @lru_cache
