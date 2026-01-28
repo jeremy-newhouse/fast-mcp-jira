@@ -1,7 +1,268 @@
-"""Input validation utilities for JIRA API parameters."""
+"""Input validation utilities for JIRA API parameters.
+
+This module provides two validation approaches:
+1. Pydantic models (IssueKeyInput, AttachmentInput, etc.) for type-safe validation
+2. Standalone functions (validate_issue_key, etc.) for backward compatibility
+
+Security Features:
+- Path traversal prevention in filenames
+- Dangerous file extension blocking
+- JQL injection pattern detection
+- Input length limits to prevent DoS
+- Account ID format validation
+"""
 
 import re
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# =============================================================================
+# Pydantic Validation Models
+# =============================================================================
+
+
+class IssueKeyInput(BaseModel):
+    """Validated JIRA issue key input.
+
+    Validates that issue keys match the JIRA format: PROJECT-123
+    where PROJECT is uppercase letters/numbers/underscores starting with a letter.
+
+    Example:
+        >>> validated = IssueKeyInput(issue_key="proj-123")
+        >>> validated.issue_key
+        'PROJ-123'
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    issue_key: str = Field(..., description="Issue key (e.g., PROJ-123)")
+
+    @field_validator("issue_key")
+    @classmethod
+    def validate_format(cls, v: str) -> str:
+        """Validate and normalize issue key format."""
+        v = v.strip().upper()
+        if not re.match(r"^[A-Z][A-Z0-9_]+-\d+$", v):
+            raise ValueError(f"Invalid issue key format '{v}'. Expected: PROJECT-123")
+        return v
+
+
+class ProjectKeyInput(BaseModel):
+    """Validated JIRA project key input.
+
+    Validates that project keys are uppercase letters/numbers/underscores
+    starting with a letter, max 10 characters.
+
+    Example:
+        >>> validated = ProjectKeyInput(project_key="myproj")
+        >>> validated.project_key
+        'MYPROJ'
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    project_key: str = Field(..., max_length=10, description="Project key (e.g., PROJ)")
+
+    @field_validator("project_key")
+    @classmethod
+    def validate_format(cls, v: str) -> str:
+        """Validate and normalize project key format."""
+        v = v.strip().upper()
+        if not re.match(r"^[A-Z][A-Z0-9_]*$", v):
+            raise ValueError(
+                f"Invalid project key '{v}'. Must start with letter, "
+                "contain only letters/numbers/underscores"
+            )
+        return v
+
+
+class AttachmentInput(BaseModel):
+    """Validated attachment input with security checks.
+
+    Security features:
+    - Filename path traversal prevention (blocks .., /, \\)
+    - Dangerous extension blocking (.exe, .bat, .cmd, .sh, .ps1, .dll, .so)
+    - Size limit of ~50MB for base64 content
+
+    Example:
+        >>> att = AttachmentInput(
+        ...     filename="report.pdf",
+        ...     content_base64="SGVsbG8gV29ybGQ="
+        ... )
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    filename: str = Field(..., max_length=255, description="Attachment filename")
+    content_base64: str = Field(
+        ...,
+        max_length=70_000_000,  # ~50MB after base64 encoding
+        description="Base64-encoded file content",
+    )
+    content_type: str = Field(
+        default="application/octet-stream",
+        description="MIME type (e.g., 'text/plain', 'image/png')",
+    )
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, v: str) -> str:
+        """Prevent path traversal and dangerous extensions."""
+        v = v.strip()
+        # Block path traversal attempts
+        if ".." in v or "/" in v or "\\" in v:
+            raise ValueError("Filename contains invalid path characters")
+        # Block null bytes
+        if "\x00" in v:
+            raise ValueError("Filename contains invalid characters")
+        # Block dangerous extensions
+        dangerous_extensions = {".exe", ".bat", ".cmd", ".sh", ".ps1", ".dll", ".so"}
+        ext = ("." + v.rsplit(".", 1)[-1].lower()) if "." in v else ""
+        if ext in dangerous_extensions:
+            raise ValueError(f"File type {ext} is not allowed for security reasons")
+        # Validate characters (alphanumeric, dots, hyphens, underscores, spaces)
+        if not re.match(r"^[\w\-. ]+$", v):
+            raise ValueError("Filename contains invalid characters")
+        return v
+
+
+class JqlInput(BaseModel):
+    """Validated JQL query input with injection prevention.
+
+    Security features:
+    - Maximum length of 10,000 characters
+    - Blocks SQL-like injection patterns (;, --, /*, */)
+
+    Example:
+        >>> query = JqlInput(jql="project = PROJ AND status = 'Open'")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    jql: str = Field(..., max_length=10000, description="JQL query string")
+
+    @field_validator("jql")
+    @classmethod
+    def validate_jql(cls, v: str) -> str:
+        """Check for potential injection patterns."""
+        v = v.strip()
+        # Check for SQL-like injection patterns
+        dangerous_patterns = [r";\s*$", r"--", r"/\*", r"\*/"]
+        v_lower = v.lower()
+        for pattern in dangerous_patterns:
+            if re.search(pattern, v_lower):
+                raise ValueError("JQL contains potentially dangerous characters")
+        return v
+
+
+class NumericIdInput(BaseModel):
+    """Validated numeric ID input.
+
+    Used for attachment IDs, comment IDs, worklog IDs, link IDs, etc.
+
+    Example:
+        >>> id_input = NumericIdInput(id="12345")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str = Field(..., description="Numeric ID")
+
+    @field_validator("id")
+    @classmethod
+    def validate_numeric(cls, v: str) -> str:
+        """Ensure ID is purely numeric."""
+        v = v.strip()
+        if not v.isdigit():
+            raise ValueError("ID must be numeric")
+        return v
+
+
+class AccountIdInput(BaseModel):
+    """Validated JIRA account ID input.
+
+    Account IDs are typically in format: 712020:uuid or 5xxxxxxxxxxxxx
+
+    Example:
+        >>> account = AccountIdInput(account_id="712020:abc-def-123")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    account_id: str = Field(..., min_length=10, max_length=128, description="JIRA account ID")
+
+    @field_validator("account_id")
+    @classmethod
+    def validate_format(cls, v: str) -> str:
+        """Validate account ID format."""
+        v = v.strip()
+        # Allow alphanumeric, colons, hyphens, underscores
+        if not re.match(r"^[a-zA-Z0-9:_-]+$", v):
+            raise ValueError("Account ID contains invalid characters")
+        return v
+
+
+class CommentInput(BaseModel):
+    """Validated comment body input.
+
+    Supports markdown formatting. Maximum 32,767 characters (JIRA limit).
+
+    Example:
+        >>> comment = CommentInput(body="This is a **bold** comment")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    body: str = Field(
+        ...,
+        max_length=32767,
+        description="Comment text with markdown support",
+    )
+
+    @field_validator("body")
+    @classmethod
+    def validate_not_empty(cls, v: str) -> str:
+        """Ensure comment is not empty."""
+        if not v.strip():
+            raise ValueError("Comment body cannot be empty")
+        return v
+
+
+class LabelListInput(BaseModel):
+    """Validated list of issue labels.
+
+    Labels can only contain letters, numbers, underscores, and hyphens.
+
+    Example:
+        >>> labels = LabelListInput(labels=["backend", "high-priority"])
+    """
+
+    labels: list[str] = Field(default_factory=list, description="List of labels")
+
+    @field_validator("labels")
+    @classmethod
+    def validate_labels(cls, v: list[str]) -> list[str]:
+        """Validate each label format."""
+        validated = []
+        for i, label in enumerate(v):
+            label = label.strip()
+            if not label:
+                continue
+            if len(label) > 255:
+                raise ValueError(f"Label {i} exceeds 255 character limit")
+            if not re.match(r"^[a-zA-Z0-9_-]+$", label):
+                raise ValueError(
+                    f"Label '{label}' contains invalid characters. "
+                    "Use only letters, numbers, underscores, hyphens"
+                )
+            validated.append(label)
+        return validated
+
+
+# =============================================================================
+# Legacy Validation Functions (for backward compatibility)
+# =============================================================================
 
 
 class ValidationError(Exception):
@@ -13,16 +274,8 @@ class ValidationError(Exception):
         super().__init__(f"{field}: {message}")
 
 
-# JIRA limits
+# Legacy constants for backward compatibility
 MAX_SUMMARY_LENGTH = 255
-MAX_COMMENT_LENGTH = 32767
-MAX_LABEL_LENGTH = 255
-MAX_PROJECT_KEY_LENGTH = 10
-
-# Patterns
-ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
-PROJECT_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
-LABEL_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def validate_issue_key(issue_key: str) -> str:
@@ -37,19 +290,11 @@ def validate_issue_key(issue_key: str) -> str:
     Raises:
         ValidationError: If the issue key format is invalid
     """
-    if not issue_key:
-        raise ValidationError("issue_key", "Issue key is required")
-
-    issue_key = issue_key.strip().upper()
-
-    if not ISSUE_KEY_PATTERN.match(issue_key):
-        raise ValidationError(
-            "issue_key",
-            f"Invalid issue key format '{issue_key}'. "
-            "Expected format: PROJECT-123 (letters, optional numbers/underscore, dash, numbers)",
-        )
-
-    return issue_key
+    try:
+        validated = IssueKeyInput(issue_key=issue_key)
+        return validated.issue_key
+    except ValueError as e:
+        raise ValidationError("issue_key", str(e))
 
 
 def validate_project_key(project_key: str) -> str:
@@ -64,25 +309,11 @@ def validate_project_key(project_key: str) -> str:
     Raises:
         ValidationError: If the project key format is invalid
     """
-    if not project_key:
-        raise ValidationError("project_key", "Project key is required")
-
-    project_key = project_key.strip().upper()
-
-    if len(project_key) > MAX_PROJECT_KEY_LENGTH:
-        raise ValidationError(
-            "project_key",
-            f"Project key exceeds maximum length of {MAX_PROJECT_KEY_LENGTH} characters",
-        )
-
-    if not PROJECT_KEY_PATTERN.match(project_key):
-        raise ValidationError(
-            "project_key",
-            f"Invalid project key format '{project_key}'. "
-            "Must start with a letter and contain only uppercase letters, numbers, and underscores",
-        )
-
-    return project_key
+    try:
+        validated = ProjectKeyInput(project_key=project_key)
+        return validated.project_key
+    except ValueError as e:
+        raise ValidationError("project_key", str(e))
 
 
 def validate_summary(summary: str) -> str:
@@ -97,10 +328,10 @@ def validate_summary(summary: str) -> str:
     Raises:
         ValidationError: If the summary is invalid
     """
+    summary = summary.strip() if summary else ""
+
     if not summary:
         raise ValidationError("summary", "Summary is required")
-
-    summary = summary.strip()
 
     if len(summary) > MAX_SUMMARY_LENGTH:
         raise ValidationError(
@@ -108,9 +339,6 @@ def validate_summary(summary: str) -> str:
             f"Summary exceeds maximum length of {MAX_SUMMARY_LENGTH} characters "
             f"(got {len(summary)})",
         )
-
-    if not summary:
-        raise ValidationError("summary", "Summary cannot be empty or whitespace only")
 
     return summary
 
@@ -127,17 +355,11 @@ def validate_comment_body(body: str) -> str:
     Raises:
         ValidationError: If the body is invalid
     """
-    if not body:
-        raise ValidationError("body", "Comment body is required")
-
-    if len(body) > MAX_COMMENT_LENGTH:
-        raise ValidationError(
-            "body",
-            f"Comment body exceeds maximum length of {MAX_COMMENT_LENGTH} characters "
-            f"(got {len(body)})",
-        )
-
-    return body
+    try:
+        validated = CommentInput(body=body)
+        return validated.body
+    except ValueError as e:
+        raise ValidationError("body", str(e))
 
 
 def validate_labels(labels: list[str] | None) -> list[str] | None:
@@ -155,29 +377,11 @@ def validate_labels(labels: list[str] | None) -> list[str] | None:
     if not labels:
         return labels
 
-    validated = []
-    for i, label in enumerate(labels):
-        if not label:
-            continue
-
-        label = label.strip()
-
-        if len(label) > MAX_LABEL_LENGTH:
-            raise ValidationError(
-                f"labels[{i}]",
-                f"Label exceeds maximum length of {MAX_LABEL_LENGTH} characters",
-            )
-
-        if not LABEL_PATTERN.match(label):
-            raise ValidationError(
-                f"labels[{i}]",
-                f"Invalid label '{label}'. Labels can only contain letters, numbers, "
-                "underscores, and hyphens",
-            )
-
-        validated.append(label)
-
-    return validated if validated else None
+    try:
+        validated = LabelListInput(labels=labels)
+        return validated.labels if validated.labels else None
+    except ValueError as e:
+        raise ValidationError("labels", str(e))
 
 
 def validate_account_id(account_id: str | None, field_name: str = "account_id") -> str | None:
@@ -196,16 +400,11 @@ def validate_account_id(account_id: str | None, field_name: str = "account_id") 
     if account_id is None or account_id == "":
         return account_id
 
-    account_id = account_id.strip()
-
-    # Account IDs are typically in format: 712020:uuid or 5xxxxxxxxxxxxx
-    if len(account_id) < 10:
-        raise ValidationError(
-            field_name,
-            f"Account ID appears too short: '{account_id}'",
-        )
-
-    return account_id
+    try:
+        validated = AccountIdInput(account_id=account_id)
+        return validated.account_id
+    except ValueError as e:
+        raise ValidationError(field_name, str(e))
 
 
 def sanitize_for_response(data: Any) -> Any:
@@ -220,18 +419,14 @@ def sanitize_for_response(data: Any) -> Any:
         Sanitized data
     """
     if isinstance(data, str):
-        # Remove script tags
-        data = re.sub(r"<script[^>]*>.*?</script>", "", data, flags=re.IGNORECASE | re.DOTALL)
-        # Remove other dangerous HTML
-        data = re.sub(
-            r"<(iframe|object|embed|form)[^>]*>.*?</\1>",
-            "",
-            data,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        return data
-    elif isinstance(data, dict):
+        # Remove dangerous HTML tags (script, iframe, object, embed, form)
+        dangerous_tags = r"<(script|iframe|object|embed|form)[^>]*>.*?</\1>"
+        return re.sub(dangerous_tags, "", data, flags=re.IGNORECASE | re.DOTALL)
+
+    if isinstance(data, dict):
         return {k: sanitize_for_response(v) for k, v in data.items()}
-    elif isinstance(data, list):
+
+    if isinstance(data, list):
         return [sanitize_for_response(item) for item in data]
+
     return data

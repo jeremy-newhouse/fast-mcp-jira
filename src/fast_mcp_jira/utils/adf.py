@@ -96,6 +96,14 @@ def _parse_inline_formatting(text: str) -> list[dict]:
         r"(_[^_]+_)"  # italic with _
     )
 
+    # Map of prefix/suffix to (strip_length, mark_type)
+    format_map = {
+        "`": (1, "code"),
+        "**": (2, "strong"),
+        "*": (1, "em"),
+        "_": (1, "em"),
+    }
+
     for match in pattern.finditer(text):
         # Add any text before the match
         if match.start() > current_pos:
@@ -105,22 +113,12 @@ def _parse_inline_formatting(text: str) -> list[dict]:
 
         matched = match.group()
 
-        if matched.startswith("`") and matched.endswith("`"):
-            # Inline code
-            code_text = matched[1:-1]
-            nodes.append(_create_text_node(code_text, [{"type": "code"}]))
-        elif matched.startswith("**") and matched.endswith("**"):
-            # Bold
-            bold_text = matched[2:-2]
-            nodes.append(_create_text_node(bold_text, [{"type": "strong"}]))
-        elif matched.startswith("*") and matched.endswith("*"):
-            # Italic with *
-            italic_text = matched[1:-1]
-            nodes.append(_create_text_node(italic_text, [{"type": "em"}]))
-        elif matched.startswith("_") and matched.endswith("_"):
-            # Italic with _
-            italic_text = matched[1:-1]
-            nodes.append(_create_text_node(italic_text, [{"type": "em"}]))
+        # Determine format type and extract inner text
+        for prefix, (strip_len, mark_type) in format_map.items():
+            if matched.startswith(prefix) and matched.endswith(prefix):
+                inner_text = matched[strip_len:-strip_len]
+                nodes.append(_create_text_node(inner_text, [{"type": mark_type}]))
+                break
 
         current_pos = match.end()
 

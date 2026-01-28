@@ -15,9 +15,7 @@ mcp = FastMCP(
     instructions="""
     This MCP server provides tools for interacting with Atlassian JIRA Cloud.
 
-    You can use generic HTTP tools (jira_get, jira_post, etc.) for any JIRA API endpoint,
-    or use the specific tools for common operations like creating issues, searching, etc.
-
+    Use the specific tools for common operations like creating issues, searching, etc.
     All issue keys should be in the format PROJECT-123 (e.g., PROJ-456).
     JQL queries are supported for searching issues.
     """,
@@ -29,7 +27,6 @@ from .tools import (  # noqa: E402, F401
     agile,
     attachments,
     comments,
-    generic,
     issues,
     links,
     metadata,

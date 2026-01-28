@@ -1,13 +1,26 @@
-"""Comment tools for JIRA issues."""
+"""Comment tools for JIRA issues.
+
+This module provides tools for managing comments on JIRA issues:
+- add_comment: Add a new comment with markdown support
+- get_comments: List all comments on an issue
+- delete_comment: Remove a comment
+
+Security Features:
+- Issue keys are validated against JIRA format
+- Comment IDs are validated as numeric
+- Comment body length is limited (max 32,767 chars)
+"""
 
 from typing import Annotated, Any
 
 from pydantic import Field
+from pydantic import ValidationError as PydanticValidationError
 
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
 from ..utils.adf import extract_text_from_adf, markdown_to_adf
 from ..utils.validation import (
+    NumericIdInput,
     ValidationError,
     validate_comment_body,
     validate_issue_key,
@@ -73,21 +86,16 @@ async def get_comments(
             f"/rest/api/3/issue/{issue_key}/comment",
             params=params,
         )
-        comments = []
-        for c in result.get("comments", []):
-            # Extract plain text from ADF body
-            body = c.get("body", {})
-            body_text = extract_text_from_adf(body) if isinstance(body, dict) else str(body)
-
-            comments.append(
-                {
-                    "id": c.get("id"),
-                    "body": body_text,
-                    "author": c.get("author", {}).get("displayName"),
-                    "created": c.get("created"),
-                    "updated": c.get("updated"),
-                }
-            )
+        comments = [
+            {
+                "id": c.get("id"),
+                "body": extract_text_from_adf(c.get("body", {})),
+                "author": c.get("author", {}).get("displayName"),
+                "created": c.get("created"),
+                "updated": c.get("updated"),
+            }
+            for c in result.get("comments", [])
+        ]
 
         return {
             "success": True,
@@ -108,18 +116,39 @@ async def delete_comment(
     issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
     comment_id: Annotated[str, Field(description="Comment ID to delete")],
 ) -> dict[str, Any]:
-    """Delete a comment from an issue."""
+    """Delete a comment from a JIRA issue.
+
+    Permanently removes a comment. This action cannot be undone.
+    Requires appropriate permissions on the issue.
+
+    Args:
+        issue_key: The JIRA issue key (e.g., "PROJ-123").
+        comment_id: Numeric ID of the comment to delete.
+
+    Returns:
+        dict containing:
+            - success (bool): Whether deletion succeeded
+            - deleted_comment_id (str): ID of deleted comment
+            - issue_key (str): The issue key
+
+    Example:
+        >>> await delete_comment(issue_key="PROJ-123", comment_id="10001")
+        {"success": True, "deleted_comment_id": "10001", "issue_key": "PROJ-123"}
+    """
     try:
         issue_key = validate_issue_key(issue_key)
+        validated_id = NumericIdInput(id=comment_id)
 
-        await jira.delete(f"/rest/api/3/issue/{issue_key}/comment/{comment_id}")
+        await jira.delete(f"/rest/api/3/issue/{issue_key}/comment/{validated_id.id}")
         return {
             "success": True,
-            "deleted_comment_id": comment_id,
+            "deleted_comment_id": validated_id.id,
             "issue_key": issue_key,
         }
     except ValidationError as e:
         return {"success": False, "error": str(e), "field": e.field}
+    except PydanticValidationError as e:
+        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "comment_id"}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
