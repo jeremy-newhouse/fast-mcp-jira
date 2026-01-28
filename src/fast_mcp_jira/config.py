@@ -21,11 +21,11 @@ Environment Variables:
 Cache Settings:
     CACHE_ENABLED: Enable SQLite caching (default: true)
     CACHE_DB_PATH: Path to cache database (default: ~/.fast-mcp-jira/cache.db)
-    CACHE_TTL_METADATA: TTL for metadata in seconds (default: 86400 = 24h)
-    CACHE_TTL_PROJECTS: TTL for projects in seconds (default: 21600 = 6h)
-    CACHE_TTL_AGILE: TTL for agile data in seconds (default: 1800 = 30m)
-    CACHE_TTL_USERS: TTL for user data in seconds (default: 3600 = 1h)
-    CACHE_CLEANUP_INTERVAL: Cleanup interval in seconds (default: 3600)
+    CACHE_TTL_METADATA: TTL for metadata in seconds (default: 2592000 = 30 days)
+    CACHE_TTL_PROJECTS: TTL for projects in seconds (default: 2592000 = 30 days)
+    CACHE_TTL_AGILE: TTL for agile data in seconds (default: 2592000 = 30 days)
+    CACHE_TTL_USERS: TTL for user data in seconds (default: 2592000 = 30 days)
+    CACHE_CLEANUP_INTERVAL: Cleanup interval in seconds (default: 86400 = daily)
     CACHE_MAX_ENTRIES: Maximum cache entries (default: 10000)
 
 Bulk Operation Settings:
@@ -110,11 +110,11 @@ class Settings(BaseSettings):
     # Cache configuration
     cache_enabled: bool = True
     cache_db_path: str = "~/.fast-mcp-jira/cache.db"
-    cache_ttl_metadata: int = 86400  # 24 hours - issue types, priorities, statuses
-    cache_ttl_projects: int = 21600  # 6 hours - projects, components, versions
-    cache_ttl_agile: int = 1800  # 30 minutes - boards, sprints
-    cache_ttl_users: int = 3600  # 1 hour - user search results
-    cache_cleanup_interval: int = 3600  # Run cleanup every hour
+    cache_ttl_metadata: int = 2592000  # 30 days - issue types, priorities, statuses
+    cache_ttl_projects: int = 2592000  # 30 days - projects, components, versions
+    cache_ttl_agile: int = 2592000  # 30 days - boards, sprints
+    cache_ttl_users: int = 2592000  # 30 days - user search results
+    cache_cleanup_interval: int = 86400  # Run cleanup daily
     cache_max_entries: int = 10000  # Maximum cache entries
 
     # Bulk operation configuration
