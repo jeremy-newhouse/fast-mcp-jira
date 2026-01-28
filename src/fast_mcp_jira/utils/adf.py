@@ -9,7 +9,7 @@ Functions:
 - extract_text_from_adf(): Extract plain text from ADF (no formatting)
 - build_adf_text(): Create simple ADF from plain text
 
-Supported markdown features (bidirectional):
+Supported markdown features for writing to JIRA (markdown_to_adf):
 - Bullet lists (- item or * item)
 - Numbered lists (1. item)
 - Checklists ([] unchecked, [x] checked)
@@ -17,14 +17,16 @@ Supported markdown features (bidirectional):
 - Inline code (`code`)
 - Bold (**text**)
 - Italic (*text* or _text_)
+- Headings (# ## ### up to h6)
+- Mentions: [~accountId:ID] or [~accountId:ID|Display Name]
+
+Additional features supported when reading from JIRA (adf_to_markdown):
 - Strikethrough (~~text~~)
 - Links ([text](url))
-- Headings (# ## ### up to h6)
 - Blockquotes (> text)
 - Horizontal rules (---)
 - Tables (| col | col |)
 - Panels/callouts (info, warning, error, note)
-- Mentions (@user)
 - Images (![alt](url))
 """
 
@@ -220,7 +222,7 @@ def _parse_inline_formatting(text: str) -> list[dict]:
     # Pattern for inline formatting including mentions
     # Matches: `code`, **bold**, *italic*, _italic_, [~accountId:...]
     pattern = re.compile(
-        r"(\[~accountId:([^\]|]+)(?:\|([^\]]+))?\])|"  # mention [~accountId:ID] or [~accountId:ID|Name]
+        r"(\[~accountId:([^\]|]+)(?:\|([^\]]+))?\])|"  # mention [~accountId:ID|Name]
         r"(`[^`]+`)|"  # inline code
         r"(\*\*[^*]+\*\*)|"  # bold
         r"(\*[^*]+\*)|"  # italic with *

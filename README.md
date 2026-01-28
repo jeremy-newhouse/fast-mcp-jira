@@ -388,6 +388,7 @@ Descriptions and comments support markdown formatting that converts to JIRA's At
 | Numbered lists | `1. item` |
 | Checklists | `[] task` / `[x] done` |
 | Code blocks | ` ```language ` |
+| @Mentions | `[~accountId:ID]` or `[~accountId:ID\|Name]` |
 
 **Example:**
 ```python

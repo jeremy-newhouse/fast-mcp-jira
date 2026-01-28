@@ -38,6 +38,25 @@ Issue descriptions and comments support markdown that automatically converts to 
 | **Numbered lists** | `1. item` | Numbered list |
 | **Checklists** | `[] task` or `[x] done` | Task list |
 | **Code blocks** | ` ```language ` | Syntax-highlighted code |
+| **@Mentions** | `[~accountId:ID]` | Mention a user by account ID |
+
+### @Mentions
+
+Mention users in descriptions and comments using JIRA's mention syntax:
+
+| Syntax | Description |
+|--------|-------------|
+| `[~accountId:557058:xyz123]` | Mention by account ID |
+| `[~accountId:557058:xyz123\|John Smith]` | Mention with display name |
+
+Use `search_users(query="name")` to find account IDs. Example:
+
+```
+add_comment(
+    issue_key="PROJ-123",
+    body="[~accountId:557058:abc123|Jane] Can you review this? cc [~accountId:557058:def456|Bob]"
+)
+```
 
 ### Code Block Languages
 
