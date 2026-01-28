@@ -22,7 +22,13 @@ from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
-from ..utils.validation import ValidationError, validate_project_key
+from ..utils.validation import (
+    ValidationError,
+    build_response,
+    validate_expand,
+    validate_order_by,
+    validate_project_key,
+)
 
 logger = get_logger(__name__)
 
@@ -61,6 +67,7 @@ async def get_projects(
             "startAt": start_at,
         }
         if expand:
+            expand = validate_expand(expand)
             params["expand"] = expand
 
         result = await jira.get("/rest/api/3/project/search", params=params)
@@ -77,25 +84,27 @@ async def get_projects(
                 }
             )
 
-        response = {
-            "success": True,
-            "total": result.get("total"),
-            "start_at": result.get("startAt"),
-            "max_results": result.get("maxResults"),
-            "is_last": result.get("isLast", True),
-            "projects": projects,
-        }
+        response = build_response(
+            True,
+            total=result.get("total"),
+            start_at=result.get("startAt"),
+            max_results=result.get("maxResults"),
+            is_last=result.get("isLast", True),
+            projects=projects,
+        )
 
         # Cache the response
         if cache:
             await cache.set(cache_key, "projects", response)
 
         return response
+    except ValidationError as e:
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting projects")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get details of a specific JIRA project.")
@@ -124,11 +133,14 @@ async def get_project(
                 cached["_cached"] = True
                 return cached
 
-        params = {"expand": expand} if expand else None
+        params = None
+        if expand:
+            expand = validate_expand(expand)
+            params = {"expand": expand}
         result = await jira.get(f"/rest/api/3/project/{project_key}", params=params)
-        response = {
-            "success": True,
-            "project": {
+        response = build_response(
+            True,
+            project={
                 "id": result.get("id"),
                 "key": result.get("key"),
                 "name": result.get("name"),
@@ -141,7 +153,7 @@ async def get_project(
                     for it in result.get("issueTypes", [])
                 ],
             },
-        }
+        )
 
         # Cache the response
         if cache:
@@ -149,12 +161,12 @@ async def get_project(
 
         return response
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting project %s", project_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get components for a JIRA project.")
@@ -191,12 +203,12 @@ async def get_components(
                 }
             )
 
-        response = {
-            "success": True,
-            "project_key": project_key,
-            "total": len(components),
-            "components": components,
-        }
+        response = build_response(
+            True,
+            project_key=project_key,
+            total=len(components),
+            components=components,
+        )
 
         # Cache the response
         if cache:
@@ -204,12 +216,12 @@ async def get_components(
 
         return response
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting components for %s", project_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get versions/releases for a JIRA project.")
@@ -230,6 +242,10 @@ async def get_versions(
     """
     try:
         project_key = validate_project_key(project_key)
+
+        # Validate order_by if provided
+        if order_by:
+            order_by = validate_order_by(order_by)
 
         # Create cache key
         params_hash = CacheService.hash_params(
@@ -266,15 +282,15 @@ async def get_versions(
                 }
             )
 
-        response = {
-            "success": True,
-            "project_key": project_key,
-            "total": result.get("total"),
-            "start_at": result.get("startAt"),
-            "max_results": result.get("maxResults"),
-            "is_last": result.get("isLast", True),
-            "versions": versions,
-        }
+        response = build_response(
+            True,
+            project_key=project_key,
+            total=result.get("total"),
+            start_at=result.get("startAt"),
+            max_results=result.get("maxResults"),
+            is_last=result.get("isLast", True),
+            versions=versions,
+        )
 
         # Cache the response
         if cache:
@@ -282,9 +298,9 @@ async def get_versions(
 
         return response
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting versions for %s", project_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

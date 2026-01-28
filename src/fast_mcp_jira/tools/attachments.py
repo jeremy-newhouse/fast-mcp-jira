@@ -11,6 +11,7 @@ Security Features:
 - Dangerous file extensions (.exe, .bat, etc.) are blocked
 - Base64 content size is limited to ~50MB
 - Attachment IDs are validated as numeric only
+- Response sanitization prevents XSS
 """
 
 import base64 as b64
@@ -26,6 +27,7 @@ from ..utils.validation import (
     AttachmentInput,
     NumericIdInput,
     ValidationError,
+    build_response,
     validate_issue_key,
 )
 
@@ -79,11 +81,11 @@ async def get_attachments(
             params={"fields": "attachment"},
         )
         attachments = result.get("fields", {}).get("attachment", [])
-        return {
-            "success": True,
-            "issue_key": validated_key,
-            "count": len(attachments),
-            "attachments": [
+        return build_response(
+            True,
+            issue_key=validated_key,
+            count=len(attachments),
+            attachments=[
                 {
                     "id": a.get("id"),
                     "filename": a.get("filename"),
@@ -95,14 +97,14 @@ async def get_attachments(
                 }
                 for a in attachments
             ],
-        }
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting attachments for %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get metadata for a specific attachment by ID.")
@@ -147,9 +149,9 @@ async def get_attachment(
         validated = NumericIdInput(id=attachment_id)
 
         result = await jira.get(f"/rest/api/3/attachment/{validated.id}")
-        return {
-            "success": True,
-            "attachment": {
+        return build_response(
+            True,
+            attachment={
                 "id": result.get("id"),
                 "filename": result.get("filename"),
                 "size": result.get("size"),
@@ -158,14 +160,14 @@ async def get_attachment(
                 "author": result.get("author", {}).get("displayName"),
                 "created": result.get("created"),
             },
-        }
+        )
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "attachment_id"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="attachment_id")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting attachment %s", attachment_id)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Delete an attachment from JIRA.")
@@ -194,17 +196,17 @@ async def delete_attachment(
         validated = NumericIdInput(id=attachment_id)
 
         await jira.delete(f"/rest/api/3/attachment/{validated.id}")
-        return {
-            "success": True,
-            "deleted_attachment_id": validated.id,
-        }
+        return build_response(
+            True,
+            deleted_attachment_id=validated.id,
+        )
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "attachment_id"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="attachment_id")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error deleting attachment %s", attachment_id)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Add an attachment to a JIRA issue.")
@@ -279,10 +281,10 @@ async def add_attachment(
 
         # Result is a list of created attachments
         attachments = result if isinstance(result, list) else [result]
-        return {
-            "success": True,
-            "issue_key": validated_key,
-            "attachments": [
+        return build_response(
+            True,
+            issue_key=validated_key,
+            attachments=[
                 {
                     "id": a.get("id"),
                     "filename": a.get("filename"),
@@ -291,17 +293,17 @@ async def add_attachment(
                 }
                 for a in attachments
             ],
-        }
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
         # Extract field name and message from Pydantic error
         err = e.errors()[0]
         field = err.get("loc", ["unknown"])[0]
         msg = err.get("msg", str(e))
-        return {"success": False, "error": msg, "field": str(field)}
+        return build_response(False, error=msg, field=str(field))
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error adding attachment to %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

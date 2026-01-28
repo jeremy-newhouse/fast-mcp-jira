@@ -50,6 +50,9 @@ cp .env.example .env
 | `CACHE_TTL_METADATA` | `86400` | Metadata cache TTL (24h) |
 | `CACHE_TTL_PROJECTS` | `21600` | Projects cache TTL (6h) |
 | `CACHE_TTL_AGILE` | `1800` | Boards/sprints cache TTL (30m) |
+| `CACHE_ENCRYPTION_ENABLED` | `false` | Enable SQLCipher cache encryption |
+| `CACHE_ENCRYPTION_KEY` | (none) | Encryption key (min 32 chars) |
+| `CACHE_ENCRYPTION_KEY_FILE` | (none) | Path to file containing encryption key |
 
 ## Security
 
@@ -98,6 +101,60 @@ All tools validate inputs before sending to JIRA:
 Built-in rate limiting protects against API abuse:
 - Default: 10 requests/second with burst of 20
 - Configurable via `RATE_LIMIT_PER_SECOND` and `RATE_LIMIT_BURST`
+- Automatic retry with Retry-After header for JIRA HTTP 429 responses
+
+### SSRF Prevention
+
+The server blocks JIRA URLs pointing to private/internal networks:
+- RFC 1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+- Loopback addresses (127.0.0.0/8, ::1)
+- Link-local addresses (169.254.0.0/16)
+
+### Response Sanitization
+
+All tool responses are sanitized to prevent XSS attacks. User-provided content in responses is escaped before being returned.
+
+### Response Size Limits
+
+API responses are limited to 50MB to prevent denial-of-service attacks from oversized payloads.
+
+### Cache Encryption
+
+Optionally encrypt the SQLite cache database using SQLCipher:
+
+```bash
+# Install with encryption support
+pip install sqlcipher3-binary
+```
+
+#### Option 1: Environment Variable
+
+```bash
+# Generate a secure key
+openssl rand -base64 32
+
+# Add to .env
+CACHE_ENCRYPTION_ENABLED=true
+CACHE_ENCRYPTION_KEY=your-generated-key-here
+```
+
+#### Option 2: Key File (Recommended for Production)
+
+```bash
+# Create the config directory
+mkdir -p ~/.fast-mcp-jira
+chmod 700 ~/.fast-mcp-jira
+
+# Generate encryption key file
+openssl rand -base64 32 > ~/.fast-mcp-jira/cache.key
+chmod 600 ~/.fast-mcp-jira/cache.key
+
+# Configure in .env
+CACHE_ENCRYPTION_ENABLED=true
+CACHE_ENCRYPTION_KEY_FILE=~/.fast-mcp-jira/cache.key
+```
+
+**Important:** The cache database (`cache.db`) and encryption key file (`cache.key`) are excluded from git via `.gitignore`. Never commit these files to version control.
 
 ## Running
 
@@ -275,27 +332,44 @@ Create, read, update, delete, and transition issues:
 
 Descriptions and comments support markdown formatting that converts to JIRA's Atlassian Document Format (ADF):
 
-```markdown
-# Heading 1
-## Heading 2
+| Feature | Syntax |
+|---------|--------|
+| Bold | `**text**` |
+| Italic | `*text*` or `_text_` |
+| Inline code | `` `code` `` |
+| Headings | `#`, `##`, `###` |
+| Bullet lists | `- item` or `* item` |
+| Numbered lists | `1. item` |
+| Checklists | `[] task` / `[x] done` |
+| Code blocks | ` ```language ` |
 
-**bold text**
-*italic text*
-`inline code`
-
-- Bullet item 1
-- Bullet item 2
-
-1. Numbered item 1
-2. Numbered item 2
-
-[] Unchecked task
-[x] Checked task
-
+**Example:**
 ```python
-code block
+create_issue(
+    project_key="PROJ",
+    summary="Fix login timeout",
+    description="""**Bug:** Login page times out after 30 seconds
+
+## Steps to Reproduce
+1. Go to /login
+2. Enter credentials
+3. Wait 30 seconds
+
+## Root Cause
+```sql
+-- Missing index on users.email
+CREATE INDEX idx_users_email ON users(email);
 ```
+
+## Checklist
+[] Deploy fix to staging
+[] Verify performance
+[x] Root cause identified
+"""
+)
 ```
+
+See [JIRA_USER_GUIDE.md](JIRA_USER_GUIDE.md) for complete markdown documentation.
 
 ## Pagination
 

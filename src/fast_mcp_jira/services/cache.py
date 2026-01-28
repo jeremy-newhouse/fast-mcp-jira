@@ -131,6 +131,22 @@ class CacheService:
             self._db = await aiosqlite.connect(str(self._db_path))
             self._db.row_factory = aiosqlite.Row
 
+            # Enable encryption if configured (requires SQLCipher-enabled SQLite)
+            if self.settings.cache_encryption_enabled:
+                try:
+                    encryption_key = self.settings.cache_encryption_key_resolved
+                    if encryption_key:
+                        # Set encryption key via PRAGMA (SQLCipher)
+                        # Note: This only works if SQLite is compiled with SQLCipher
+                        await self._db.execute(f"PRAGMA key = '{encryption_key}'")
+                        await self._db.execute("PRAGMA cipher_compatibility = 4")
+                        logger.info("Cache encryption enabled (SQLCipher)")
+                except Exception as e:
+                    logger.warning(
+                        "Cache encryption failed - ensure SQLCipher is available",
+                        extra={"error": str(e)},
+                    )
+
             # Enable WAL mode for better concurrent read performance
             await self._db.execute("PRAGMA journal_mode=WAL")
 

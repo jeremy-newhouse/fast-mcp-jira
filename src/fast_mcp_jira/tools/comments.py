@@ -9,6 +9,8 @@ Security Features:
 - Issue keys are validated against JIRA format
 - Comment IDs are validated as numeric
 - Comment body length is limited (max 32,767 chars)
+- Order_by parameter validated against whitelist
+- Response sanitization prevents XSS
 """
 
 from typing import Annotated, Any
@@ -19,12 +21,14 @@ from pydantic import ValidationError as PydanticValidationError
 from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
-from ..utils.adf import extract_text_from_adf, markdown_to_adf
+from ..utils.adf import adf_to_markdown, markdown_to_adf
 from ..utils.validation import (
     NumericIdInput,
     ValidationError,
+    build_response,
     validate_comment_body,
     validate_issue_key,
+    validate_order_by,
 )
 
 logger = get_logger(__name__)
@@ -50,20 +54,20 @@ async def add_comment(
             f"/rest/api/3/issue/{issue_key}/comment",
             body={"body": markdown_to_adf(body)},
         )
-        return {
-            "success": True,
-            "comment_id": result.get("id"),
-            "issue_key": issue_key,
-            "created": result.get("created"),
-            "author": result.get("author", {}).get("displayName"),
-        }
+        return build_response(
+            True,
+            comment_id=result.get("id"),
+            issue_key=issue_key,
+            created=result.get("created"),
+            author=result.get("author", {}).get("displayName"),
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error adding comment to %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get all comments on a JIRA issue.")
@@ -80,6 +84,7 @@ async def get_comments(
     """Get comments for an issue."""
     try:
         issue_key = validate_issue_key(issue_key)
+        order_by = validate_order_by(order_by)
 
         params = {
             "maxResults": max_results,
@@ -93,7 +98,7 @@ async def get_comments(
         comments = [
             {
                 "id": c.get("id"),
-                "body": extract_text_from_adf(c.get("body", {})),
+                "body": adf_to_markdown(c.get("body")),
                 "author": c.get("author", {}).get("displayName"),
                 "created": c.get("created"),
                 "updated": c.get("updated"),
@@ -101,19 +106,19 @@ async def get_comments(
             for c in result.get("comments", [])
         ]
 
-        return {
-            "success": True,
-            "issue_key": issue_key,
-            "total": result.get("total"),
-            "comments": comments,
-        }
+        return build_response(
+            True,
+            issue_key=issue_key,
+            total=result.get("total"),
+            comments=comments,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting comments for %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Delete a comment from a JIRA issue.")
@@ -145,17 +150,17 @@ async def delete_comment(
         validated_id = NumericIdInput(id=comment_id)
 
         await jira.delete(f"/rest/api/3/issue/{issue_key}/comment/{validated_id.id}")
-        return {
-            "success": True,
-            "deleted_comment_id": validated_id.id,
-            "issue_key": issue_key,
-        }
+        return build_response(
+            True,
+            deleted_comment_id=validated_id.id,
+            issue_key=issue_key,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "comment_id"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="comment_id")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error deleting comment %s from %s", comment_id, issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 # Maximum error message length to prevent info leakage
 MAX_ERROR_MESSAGE_LENGTH = 500
 
+# Maximum response size to prevent DoS via large responses (50MB)
+MAX_RESPONSE_SIZE = 50_000_000
+
+# Maximum retries for rate-limited (429) responses
+MAX_429_RETRIES = 3
+
+# Maximum wait time for Retry-After header (2 minutes)
+MAX_RETRY_AFTER_SECONDS = 120
+
 # Fields that may contain sensitive data and should not be logged
 SENSITIVE_PARAM_KEYS = {"jql", "body", "content", "password", "token", "secret", "key"}
 
@@ -190,6 +199,14 @@ class JiraClient:
             Configured httpx.AsyncClient instance.
         """
         if self._client is None:
+            # Security warning when SSL verification is disabled
+            if not self.settings.jira_ssl_verify:
+                logger.warning(
+                    "SSL verification DISABLED for JIRA connection. "
+                    "This makes the connection vulnerable to man-in-the-middle attacks. "
+                    "Only disable for development/testing with self-signed certificates."
+                )
+
             self._client = httpx.AsyncClient(
                 base_url=self.settings.base_url,
                 headers={
@@ -288,6 +305,61 @@ class JiraClient:
         field_errors = [f"{k}: {v}" for k, v in errors.items() if not k.startswith("_")]
         return "; ".join(field_errors)
 
+    def _validate_response_size(self, response: httpx.Response) -> None:
+        """Validate response size to prevent DoS via large responses.
+
+        Args:
+            response: HTTP response to validate.
+
+        Raises:
+            JiraError: If response exceeds maximum allowed size.
+        """
+        content_length = len(response.content)
+        if content_length > MAX_RESPONSE_SIZE:
+            raise JiraError(
+                message=f"Response too large: {content_length} bytes "
+                f"(max: {MAX_RESPONSE_SIZE} bytes)",
+                status_code=response.status_code,
+            )
+
+    async def _handle_rate_limit(self, response: httpx.Response, attempt: int) -> bool:
+        """Handle HTTP 429 rate limit response with retry.
+
+        Args:
+            response: HTTP response with 429 status.
+            attempt: Current attempt number (0-indexed).
+
+        Returns:
+            True if should retry, False if max retries exceeded.
+        """
+        if response.status_code != 429:
+            return False
+
+        if attempt >= MAX_429_RETRIES - 1:
+            logger.error(
+                "Max retries exceeded for rate limit (429). Consider reducing request rate."
+            )
+            return False
+
+        # Parse Retry-After header (seconds to wait)
+        retry_after = response.headers.get("Retry-After", "60")
+        try:
+            wait_seconds = int(retry_after)
+        except ValueError:
+            wait_seconds = 60  # Default to 60 seconds
+
+        # Cap wait time to prevent excessive delays
+        wait_seconds = min(wait_seconds, MAX_RETRY_AFTER_SECONDS)
+
+        logger.warning(
+            "Rate limited by JIRA (429). Retrying in %d seconds (attempt %d/%d)",
+            wait_seconds,
+            attempt + 1,
+            MAX_429_RETRIES,
+        )
+        await asyncio.sleep(wait_seconds)
+        return True
+
     async def get(
         self, path: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any] | list[Any]:
@@ -301,14 +373,25 @@ class JiraClient:
             Parsed JSON response as dict or list.
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("GET %s params=%s", path, _sanitize_params_for_logging(params))
-        response = await self.client.get(path, params=params)
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("GET %s params=%s", path, _sanitize_params_for_logging(params))
+            response = await self.client.get(path, params=params)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        # If we get here, all retries were exhausted on 429
+        self._handle_error(response)
+        return {}
 
     async def post(
         self,
@@ -327,14 +410,24 @@ class JiraClient:
             Parsed JSON response.
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("POST %s", path)
-        response = await self.client.post(path, json=body, params=params)
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("POST %s", path)
+            response = await self.client.post(path, json=body, params=params)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}
 
     async def post_raw(
         self,
@@ -356,19 +449,29 @@ class JiraClient:
             Parsed JSON response (empty dict if no content).
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("POST raw %s", path)
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("POST raw %s", path)
 
-        response = await self.client.post(
-            path,
-            content=content,
-            headers={"Content-Type": content_type},
-        )
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+            response = await self.client.post(
+                path,
+                content=content,
+                headers={"Content-Type": content_type},
+            )
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}
 
     async def put(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a PUT request to JIRA API.
@@ -381,14 +484,24 @@ class JiraClient:
             Parsed JSON response.
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("PUT %s", path)
-        response = await self.client.put(path, json=body)
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("PUT %s", path)
+            response = await self.client.put(path, json=body)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}
 
     async def patch(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a PATCH request to JIRA API.
@@ -401,14 +514,24 @@ class JiraClient:
             Parsed JSON response.
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("PATCH %s", path)
-        response = await self.client.patch(path, json=body)
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("PATCH %s", path)
+            response = await self.client.patch(path, json=body)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}
 
     async def delete(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a DELETE request to JIRA API.
@@ -421,14 +544,24 @@ class JiraClient:
             Parsed JSON response (often empty).
 
         Raises:
-            JiraError: If the request fails.
+            JiraError: If the request fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("DELETE %s", path)
-        response = await self.client.delete(path, params=params)
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("DELETE %s", path)
+            response = await self.client.delete(path, params=params)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}
 
     async def post_multipart(
         self,
@@ -452,11 +585,8 @@ class JiraClient:
             Parsed JSON response with attachment details.
 
         Raises:
-            JiraError: If the upload fails.
+            JiraError: If the upload fails or response is too large.
         """
-        await self._rate_limiter.acquire()
-        logger.debug("POST multipart %s filename=%s size=%d", path, filename, len(content))
-
         files = {"file": (filename, content, content_type)}
         # Need to override content-type header for multipart
         headers = {
@@ -465,13 +595,25 @@ class JiraClient:
             "X-Atlassian-Token": "no-check",  # Required for attachment uploads
         }
 
-        async with httpx.AsyncClient(
-            base_url=self.settings.base_url,
-            verify=self.settings.jira_ssl_verify,
-            timeout=self.settings.upload_timeout,
-        ) as client:
-            response = await client.post(path, files=files, headers=headers)
+        for attempt in range(MAX_429_RETRIES):
+            await self._rate_limiter.acquire()
+            logger.debug("POST multipart %s filename=%s size=%d", path, filename, len(content))
 
-        if not response.is_success:
-            self._handle_error(response)
-        return response.json() if response.content else {}
+            async with httpx.AsyncClient(
+                base_url=self.settings.base_url,
+                verify=self.settings.jira_ssl_verify,
+                timeout=self.settings.upload_timeout,
+            ) as client:
+                response = await client.post(path, files=files, headers=headers)
+
+            if await self._handle_rate_limit(response, attempt):
+                continue
+
+            if not response.is_success:
+                self._handle_error(response)
+
+            self._validate_response_size(response)
+            return response.json() if response.content else {}
+
+        self._handle_error(response)
+        return {}

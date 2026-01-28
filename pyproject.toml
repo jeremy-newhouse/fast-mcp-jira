@@ -18,6 +18,9 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
 ]
+encryption = [
+    "sqlcipher3-binary>=0.5.0,<1.0.0",
+]
 
 [project.scripts]
 fast-mcp-jira = "fast_mcp_jira.__main__:main"

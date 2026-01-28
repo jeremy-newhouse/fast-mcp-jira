@@ -14,6 +14,7 @@ from pydantic import Field
 
 from ..logging_config import get_logger
 from ..server import cache, mcp
+from ..utils.validation import build_response
 
 logger = get_logger(__name__)
 
@@ -32,17 +33,17 @@ async def get_cache_stats() -> dict[str, Any]:
         Cache statistics dictionary with success status.
     """
     if cache is None:
-        return {
-            "success": False,
-            "error": {"message": "Cache is disabled", "code": "CACHE_DISABLED"},
-        }
+        return build_response(
+            False,
+            error={"message": "Cache is disabled", "code": "CACHE_DISABLED"},
+        )
 
     try:
         stats = await cache.get_stats()
-        return {"success": True, **stats}
+        return build_response(True, **stats)
     except Exception:
         logger.exception("Unexpected error getting cache stats")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Invalidate (clear) cache entries.")
@@ -90,19 +91,19 @@ async def invalidate_cache(
         Number of entries invalidated.
     """
     if cache is None:
-        return {
-            "success": False,
-            "error": {"message": "Cache is disabled", "code": "CACHE_DISABLED"},
-        }
+        return build_response(
+            False,
+            error={"message": "Cache is disabled", "code": "CACHE_DISABLED"},
+        )
 
     if not any([entity_type, cache_key, invalidate_all]):
-        return {
-            "success": False,
-            "error": {
+        return build_response(
+            False,
+            error={
                 "message": "Must specify entity_type, cache_key, or invalidate_all=true",
                 "code": "VALIDATION_ERROR",
             },
-        }
+        )
 
     try:
         if invalidate_all:
@@ -112,13 +113,13 @@ async def invalidate_cache(
         else:
             count = await cache.invalidate(cache_key=cache_key)
 
-        return {
-            "success": True,
-            "invalidated_count": count,
-            "entity_type": entity_type,
-            "cache_key": cache_key,
-            "invalidate_all": invalidate_all,
-        }
+        return build_response(
+            True,
+            invalidated_count=count,
+            entity_type=entity_type,
+            cache_key=cache_key,
+            invalidate_all=invalidate_all,
+        )
     except Exception:
         logger.exception("Unexpected error invalidating cache")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

@@ -9,6 +9,9 @@ Cached entities and TTLs:
 - statuses: 24 hours
 - fields: 24 hours
 - users: 1 hour (search results)
+
+Security Features:
+- Response sanitization prevents XSS
 """
 
 from typing import Annotated, Any
@@ -19,6 +22,7 @@ from ..logging_config import get_logger
 from ..server import cache, jira, mcp
 from ..services.cache import CacheService
 from ..services.jira_client import JiraError
+from ..utils.validation import build_response
 
 logger = get_logger(__name__)
 
@@ -52,11 +56,11 @@ async def get_issue_types() -> dict[str, Any]:
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(issue_types),
-            "issue_types": issue_types,
-        }
+        response = build_response(
+            True,
+            total=len(issue_types),
+            issue_types=issue_types,
+        )
 
         # Cache the response
         if cache:
@@ -64,10 +68,10 @@ async def get_issue_types() -> dict[str, Any]:
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting issue types")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get all priority levels available in JIRA.")
@@ -98,11 +102,11 @@ async def get_priorities() -> dict[str, Any]:
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(priorities),
-            "priorities": priorities,
-        }
+        response = build_response(
+            True,
+            total=len(priorities),
+            priorities=priorities,
+        )
 
         # Cache the response
         if cache:
@@ -110,10 +114,10 @@ async def get_priorities() -> dict[str, Any]:
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting priorities")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get all workflow statuses available in JIRA.")
@@ -145,11 +149,11 @@ async def get_statuses() -> dict[str, Any]:
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(statuses),
-            "statuses": statuses,
-        }
+        response = build_response(
+            True,
+            total=len(statuses),
+            statuses=statuses,
+        )
 
         # Cache the response
         if cache:
@@ -157,10 +161,10 @@ async def get_statuses() -> dict[str, Any]:
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting statuses")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Search for JIRA users by query string.")
@@ -207,11 +211,11 @@ async def search_users(
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(users),
-            "users": users,
-        }
+        response = build_response(
+            True,
+            total=len(users),
+            users=users,
+        )
 
         # Cache the response
         if cache:
@@ -219,10 +223,10 @@ async def search_users(
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error searching users")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get all available fields in JIRA.")
@@ -256,11 +260,11 @@ async def get_fields() -> dict[str, Any]:
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(fields),
-            "fields": fields,
-        }
+        response = build_response(
+            True,
+            total=len(fields),
+            fields=fields,
+        )
 
         # Cache the response
         if cache:
@@ -268,7 +272,7 @@ async def get_fields() -> dict[str, Any]:
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting fields")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

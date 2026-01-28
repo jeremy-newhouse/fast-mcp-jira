@@ -619,3 +619,212 @@ def sanitize_for_response(data: Any) -> Any:
         return [sanitize_for_response(item) for item in data]
 
     return data
+
+
+def build_response(success: bool, **data: Any) -> dict[str, Any]:
+    """Build a sanitized tool response.
+
+    This is the standard way to build responses from MCP tools.
+    All data values are automatically sanitized to remove potentially
+    dangerous HTML content (XSS prevention).
+
+    Args:
+        success: Whether the operation succeeded.
+        **data: Response data fields to include.
+
+    Returns:
+        Dict with 'success' field and sanitized data.
+
+    Example:
+        >>> build_response(True, issue_key="PROJ-123", data={"summary": "Test"})
+        {"success": True, "issue_key": "PROJ-123", "data": {"summary": "Test"}}
+    """
+    sanitized = {k: sanitize_for_response(v) for k, v in data.items()}
+    return {"success": success, **sanitized}
+
+
+# =============================================================================
+# Additional Validators for Security Hardening
+# =============================================================================
+
+
+# Allowed values for order_by parameters
+ALLOWED_ORDER_BY_VALUES = {
+    "created",
+    "-created",
+    "updated",
+    "-updated",
+    "name",
+    "-name",
+    "releaseDate",
+    "-releaseDate",
+    "sequence",
+    "-sequence",
+}
+
+
+class OrderByInput(BaseModel):
+    """Validated order_by parameter.
+
+    Only allows known safe ordering values to prevent unexpected API behavior.
+
+    Example:
+        >>> validated = OrderByInput(order_by="-created")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    order_by: str = Field(..., max_length=50, description="Order by field")
+
+    @field_validator("order_by")
+    @classmethod
+    def validate_order_by(cls, v: str) -> str:
+        """Validate order_by against whitelist."""
+        v = v.strip()
+        if v not in ALLOWED_ORDER_BY_VALUES:
+            raise ValueError(
+                f"Invalid order_by value: '{v}'. "
+                f"Allowed: {', '.join(sorted(ALLOWED_ORDER_BY_VALUES))}"
+            )
+        return v
+
+
+def validate_order_by(order_by: str) -> str:
+    """Validate order_by parameter.
+
+    Args:
+        order_by: Order by value to validate.
+
+    Returns:
+        The validated order_by value.
+
+    Raises:
+        ValidationError: If the order_by value is not allowed.
+    """
+    try:
+        validated = OrderByInput(order_by=order_by)
+        return validated.order_by
+    except ValueError as e:
+        raise ValidationError("order_by", str(e))
+
+
+# Allowed values for expand parameters
+ALLOWED_EXPAND_VALUES = {
+    # Issue expansions
+    "changelog",
+    "renderedFields",
+    "names",
+    "schema",
+    "transitions",
+    "operations",
+    "editmeta",
+    "versionedRepresentations",
+    # Project expansions
+    "description",
+    "lead",
+    "issueTypes",
+    "url",
+    "projectKeys",
+    "permissions",
+    "insight",
+}
+
+
+class ExpandInput(BaseModel):
+    """Validated expand parameter.
+
+    Only allows known safe expand fields to prevent exposure of internal data.
+
+    Example:
+        >>> validated = ExpandInput(expand="changelog,renderedFields")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    expand: str = Field(..., max_length=500, description="Comma-separated expand fields")
+
+    @field_validator("expand")
+    @classmethod
+    def validate_expand(cls, v: str) -> str:
+        """Validate each expand field against whitelist."""
+        v = v.strip()
+        if not v:
+            return v
+        for field in v.split(","):
+            field = field.strip()
+            if field and field not in ALLOWED_EXPAND_VALUES:
+                raise ValueError(
+                    f"Invalid expand field: '{field}'. "
+                    f"Allowed: {', '.join(sorted(ALLOWED_EXPAND_VALUES))}"
+                )
+        return v
+
+
+def validate_expand(expand: str) -> str:
+    """Validate expand parameter.
+
+    Args:
+        expand: Comma-separated expand fields to validate.
+
+    Returns:
+        The validated expand value.
+
+    Raises:
+        ValidationError: If any expand field is not allowed.
+    """
+    try:
+        validated = ExpandInput(expand=expand)
+        return validated.expand
+    except ValueError as e:
+        raise ValidationError("expand", str(e))
+
+
+class DateTimeInput(BaseModel):
+    """Validated ISO 8601 datetime parameter.
+
+    Validates datetime strings in ISO 8601 format as used by JIRA API.
+
+    Example:
+        >>> validated = DateTimeInput(datetime="2024-01-15T09:00:00.000+0000")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    datetime: str = Field(..., max_length=50, description="ISO 8601 datetime")
+
+    @field_validator("datetime")
+    @classmethod
+    def validate_iso8601(cls, v: str) -> str:
+        """Validate ISO 8601 datetime format."""
+        v = v.strip()
+        # ISO 8601 formats:
+        # - 2024-01-15T09:00:00.000Z
+        # - 2024-01-15T09:00:00.000+0000
+        # - 2024-01-15T09:00:00Z
+        # - 2024-01-15T09:00:00+00:00
+        pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:?\d{2})?$"
+        if not re.match(pattern, v):
+            raise ValueError(
+                f"Invalid ISO 8601 datetime: '{v}'. "
+                "Expected format: YYYY-MM-DDTHH:MM:SS.sss+HHMM or YYYY-MM-DDTHH:MM:SSZ"
+            )
+        return v
+
+
+def validate_datetime(datetime_str: str) -> str:
+    """Validate ISO 8601 datetime string.
+
+    Args:
+        datetime_str: Datetime string to validate.
+
+    Returns:
+        The validated datetime string.
+
+    Raises:
+        ValidationError: If the datetime format is invalid.
+    """
+    try:
+        validated = DateTimeInput(datetime=datetime_str)
+        return validated.datetime
+    except ValueError as e:
+        raise ValidationError("datetime", str(e))

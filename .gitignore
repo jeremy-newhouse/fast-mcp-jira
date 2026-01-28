@@ -68,6 +68,13 @@ Thumbs.db
 # Project specific
 tmp/
 
+# Cache database and encryption keys
+*.db
+*.key
+cache.db
+cache.key
+.fast-mcp-jira/
+
 # Claude
 CLAUDE.md
 CONTEXT.md

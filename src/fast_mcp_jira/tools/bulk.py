@@ -27,6 +27,7 @@ from ..utils.validation import (
     BulkUpdateFieldsInput,
     TransitionNameInput,
     ValidationError,
+    build_response,
     validate_issue_key,
 )
 
@@ -127,23 +128,23 @@ async def bulk_update_issues(
 
     # Validate batch size
     if len(issue_keys) > settings.bulk_max_batch_size:
-        return {
-            "success": False,
-            "error": f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
-            "code": "BATCH_SIZE_ERROR",
-        }
+        return build_response(
+            False,
+            error=f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
+            code="BATCH_SIZE_ERROR",
+        )
 
     # Validate issue keys
     try:
         validated_keys = [validate_issue_key(key) for key in issue_keys]
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": "issue_keys"}
+        return build_response(False, error=str(e), field="issue_keys")
 
     # Validate update fields (security: only allow known safe fields)
     try:
         BulkUpdateFieldsInput(updates=updates)
     except ValueError as e:
-        return {"success": False, "error": str(e), "field": "updates"}
+        return build_response(False, error=str(e), field="updates")
 
     logger.info(
         "Starting bulk update",
@@ -178,13 +179,13 @@ async def bulk_update_issues(
         extra={"success_count": success_count, "failure_count": failure_count},
     )
 
-    return {
-        "success": failure_count == 0,
-        "total": len(validated_keys),
-        "updated": success_count,
-        "failed": failure_count,
-        "results": processed_results,
-    }
+    return build_response(
+        failure_count == 0,
+        total=len(validated_keys),
+        updated=success_count,
+        failed=failure_count,
+        results=processed_results,
+    )
 
 
 @mcp.tool(description="Transition multiple issues to a new status.")
@@ -214,23 +215,23 @@ async def bulk_transition_issues(
 
     # Validate batch size
     if len(issue_keys) > settings.bulk_max_batch_size:
-        return {
-            "success": False,
-            "error": f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
-            "code": "BATCH_SIZE_ERROR",
-        }
+        return build_response(
+            False,
+            error=f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
+            code="BATCH_SIZE_ERROR",
+        )
 
     # Validate issue keys
     try:
         validated_keys = [validate_issue_key(key) for key in issue_keys]
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": "issue_keys"}
+        return build_response(False, error=str(e), field="issue_keys")
 
     # Validate transition name
     try:
         TransitionNameInput(name=transition_name)
     except ValueError as e:
-        return {"success": False, "error": str(e), "field": "transition_name"}
+        return build_response(False, error=str(e), field="transition_name")
 
     logger.info(
         "Starting bulk transition",
@@ -272,14 +273,14 @@ async def bulk_transition_issues(
         extra={"success_count": success_count, "failure_count": failure_count},
     )
 
-    return {
-        "success": failure_count == 0,
-        "total": len(validated_keys),
-        "transitioned": success_count,
-        "failed": failure_count,
-        "transition_name": transition_name,
-        "results": results,
-    }
+    return build_response(
+        failure_count == 0,
+        total=len(validated_keys),
+        transitioned=success_count,
+        failed=failure_count,
+        transition_name=transition_name,
+        results=results,
+    )
 
 
 @mcp.tool(description="Add the same comment to multiple issues.")
@@ -316,24 +317,24 @@ async def bulk_add_comments(
 
     # Validate batch size
     if len(issue_keys) > settings.bulk_max_batch_size:
-        return {
-            "success": False,
-            "error": f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
-            "code": "BATCH_SIZE_ERROR",
-        }
+        return build_response(
+            False,
+            error=f"Batch size {len(issue_keys)} exceeds maximum {settings.bulk_max_batch_size}",
+            code="BATCH_SIZE_ERROR",
+        )
 
     # Validate issue keys
     try:
         validated_keys = [validate_issue_key(key) for key in issue_keys]
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": "issue_keys"}
+        return build_response(False, error=str(e), field="issue_keys")
 
     if not body.strip():
-        return {
-            "success": False,
-            "error": "Comment body cannot be empty",
-            "code": "VALIDATION_ERROR",
-        }
+        return build_response(
+            False,
+            error="Comment body cannot be empty",
+            code="VALIDATION_ERROR",
+        )
 
     logger.info(
         "Starting bulk comment",
@@ -368,10 +369,10 @@ async def bulk_add_comments(
         extra={"success_count": success_count, "failure_count": failure_count},
     )
 
-    return {
-        "success": failure_count == 0,
-        "total": len(validated_keys),
-        "commented": success_count,
-        "failed": failure_count,
-        "results": processed_results,
-    }
+    return build_response(
+        failure_count == 0,
+        total=len(validated_keys),
+        commented=success_count,
+        failed=failure_count,
+        results=processed_results,
+    )

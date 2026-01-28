@@ -9,6 +9,8 @@ Security Features:
 - Issue keys are validated against JIRA format
 - Worklog IDs are validated as numeric
 - Time spent format is validated
+- ISO 8601 datetime format validated
+- Response sanitization prevents XSS
 """
 
 from typing import Annotated, Any
@@ -24,6 +26,8 @@ from ..utils.validation import (
     NumericIdInput,
     TimeSpentInput,
     ValidationError,
+    build_response,
+    validate_datetime,
     validate_issue_key,
 )
 
@@ -59,30 +63,31 @@ async def add_worklog(
             body["comment"] = markdown_to_adf(comment)
 
         if started:
+            started = validate_datetime(started)
             body["started"] = started
 
         result = await jira.post(
             f"/rest/api/3/issue/{issue_key}/worklog",
             body=body,
         )
-        return {
-            "success": True,
-            "worklog_id": result.get("id"),
-            "issue_key": issue_key,
-            "time_spent": result.get("timeSpent"),
-            "time_spent_seconds": result.get("timeSpentSeconds"),
-            "author": result.get("author", {}).get("displayName"),
-            "started": result.get("started"),
-        }
+        return build_response(
+            True,
+            worklog_id=result.get("id"),
+            issue_key=issue_key,
+            time_spent=result.get("timeSpent"),
+            time_spent_seconds=result.get("timeSpentSeconds"),
+            author=result.get("author", {}).get("displayName"),
+            started=result.get("started"),
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "time_spent"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="time_spent")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error adding worklog to %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get all worklogs for a JIRA issue.")
@@ -124,19 +129,19 @@ async def get_worklogs(
                 }
             )
 
-        return {
-            "success": True,
-            "issue_key": issue_key,
-            "total": result.get("total"),
-            "worklogs": worklogs,
-        }
+        return build_response(
+            True,
+            issue_key=issue_key,
+            total=result.get("total"),
+            worklogs=worklogs,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting worklogs for %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Delete a worklog entry from a JIRA issue.")
@@ -150,17 +155,17 @@ async def delete_worklog(
         validated_id = NumericIdInput(id=worklog_id)
 
         await jira.delete(f"/rest/api/3/issue/{issue_key}/worklog/{validated_id.id}")
-        return {
-            "success": True,
-            "deleted_worklog_id": validated_id.id,
-            "issue_key": issue_key,
-        }
+        return build_response(
+            True,
+            deleted_worklog_id=validated_id.id,
+            issue_key=issue_key,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "worklog_id"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="worklog_id")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error deleting worklog %s from %s", worklog_id, issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

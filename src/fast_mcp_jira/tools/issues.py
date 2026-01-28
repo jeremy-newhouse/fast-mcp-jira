@@ -25,11 +25,13 @@ from pydantic import ValidationError as PydanticValidationError
 from ..logging_config import get_logger
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
-from ..utils.adf import markdown_to_adf
+from ..utils.adf import adf_to_markdown, markdown_to_adf
 from ..utils.validation import (
     FieldListInput,
     JqlInput,
     ValidationError,
+    build_response,
+    validate_expand,
     validate_issue_key,
     validate_labels,
     validate_project_key,
@@ -85,19 +87,19 @@ async def create_issue(
             fields["assignee"] = {"accountId": assignee}
 
         result = await jira.post("/rest/api/3/issue", body={"fields": fields})
-        return {
-            "success": True,
-            "issue_key": result.get("key"),
-            "issue_id": result.get("id"),
-            "self": result.get("self"),
-        }
+        return build_response(
+            True,
+            issue_key=result.get("key"),
+            issue_id=result.get("id"),
+            self=result.get("self"),
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error creating issue in %s", project_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get details of a JIRA issue by its key.")
@@ -120,23 +122,28 @@ async def get_issue(
             validated_fields = FieldListInput(fields=fields)
             params["fields"] = validated_fields.fields
         if expand:
-            validated_expand = FieldListInput(fields=expand)
-            params["expand"] = validated_expand.fields
+            expand = validate_expand(expand)
+            params["expand"] = expand
 
         result = await jira.get(
             f"/rest/api/3/issue/{issue_key}",
             params=params if params else None,
         )
-        return {"success": True, "issue": result}
+
+        # Convert description from ADF to markdown for readability
+        if "fields" in result and "description" in result["fields"]:
+            result["fields"]["description"] = adf_to_markdown(result["fields"]["description"])
+
+        return build_response(True, issue=result)
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "fields"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="fields")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting issue %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Search for JIRA issues using JQL (JIRA Query Language).")
@@ -203,19 +210,19 @@ async def search_issues(
             params["nextPageToken"] = next_page_token
 
         result = await jira.get("/rest/api/3/search/jql", params=params)
-        return {
-            "success": True,
-            "issues": result.get("issues", []),
-            "next_page_token": result.get("nextPageToken"),
-            "is_last": result.get("isLast", True),
-        }
+        return build_response(
+            True,
+            issues=result.get("issues", []),
+            next_page_token=result.get("nextPageToken"),
+            is_last=result.get("isLast", True),
+        )
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "jql"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="jql")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error searching issues")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Update fields on an existing JIRA issue.")
@@ -262,17 +269,17 @@ async def update_issue(
             fields["assignee"] = None if assignee == "" else {"accountId": assignee}
 
         if not fields:
-            return {"success": False, "error": "No fields to update"}
+            return build_response(False, error="No fields to update")
 
         await jira.put(f"/rest/api/3/issue/{issue_key}", body={"fields": fields})
-        return {"success": True, "issue_key": issue_key, "updated_fields": list(fields.keys())}
+        return build_response(True, issue_key=issue_key, updated_fields=list(fields.keys()))
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error updating issue %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Delete a JIRA issue.")
@@ -287,14 +294,14 @@ async def delete_issue(
         issue_key = validate_issue_key(issue_key)
         params = {"deleteSubtasks": "true"} if delete_subtasks else None
         await jira.delete(f"/rest/api/3/issue/{issue_key}", params=params)
-        return {"success": True, "deleted": issue_key}
+        return build_response(True, deleted=issue_key)
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error deleting issue %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Transition a JIRA issue to a new status.")
@@ -317,13 +324,13 @@ async def transition_issue(
 
         # If no transition specified, return available options
         if not transition_id and not transition_name:
-            return {
-                "success": True,
-                "available_transitions": [
+            return build_response(
+                True,
+                available_transitions=[
                     {"id": t["id"], "name": t["name"], "to": t.get("to", {}).get("name")}
                     for t in transitions
                 ],
-            }
+            )
 
         # Find transition ID by name if needed
         if not transition_id:
@@ -334,24 +341,24 @@ async def transition_issue(
 
             if not transition_id:
                 available = [t["name"] for t in transitions]
-                return {
-                    "success": False,
-                    "error": f"Transition '{transition_name}' not found. Available: {available}",
-                }
+                return build_response(
+                    False,
+                    error=f"Transition '{transition_name}' not found. Available: {available}",
+                )
 
         # Execute transition
         await jira.post(
             f"/rest/api/3/issue/{issue_key}/transitions",
             body={"transition": {"id": transition_id}},
         )
-        return {"success": True, "issue_key": issue_key, "transition_id": transition_id}
+        return build_response(True, issue_key=issue_key, transition_id=transition_id)
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error transitioning issue %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get available transitions for a JIRA issue.")
@@ -363,10 +370,10 @@ async def get_transitions(
         issue_key = validate_issue_key(issue_key)
         result = await jira.get(f"/rest/api/3/issue/{issue_key}/transitions")
         transitions = result.get("transitions", [])
-        return {
-            "success": True,
-            "issue_key": issue_key,
-            "transitions": [
+        return build_response(
+            True,
+            issue_key=issue_key,
+            transitions=[
                 {
                     "id": t["id"],
                     "name": t["name"],
@@ -375,14 +382,14 @@ async def get_transitions(
                 }
                 for t in transitions
             ],
-        }
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting transitions for %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Get changelog/history for a JIRA issue.")
@@ -421,18 +428,18 @@ async def get_changelog(
                 }
             )
 
-        return {
-            "success": True,
-            "issue_key": issue_key,
-            "total": result.get("total", len(histories)),
-            "start_at": result.get("startAt", start_at),
-            "max_results": result.get("maxResults", max_results),
-            "histories": histories,
-        }
+        return build_response(
+            True,
+            issue_key=issue_key,
+            total=result.get("total", len(histories)),
+            start_at=result.get("startAt", start_at),
+            max_results=result.get("maxResults", max_results),
+            histories=histories,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting changelog for %s", issue_key)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

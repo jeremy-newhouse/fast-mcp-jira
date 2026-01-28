@@ -9,6 +9,7 @@ Security Features:
 - Issue keys are validated against JIRA format
 - Link IDs are validated as numeric
 - Link type names are validated
+- Response sanitization prevents XSS
 
 Caching:
 - Link types are cached for 24 hours (rarely change)
@@ -27,6 +28,7 @@ from ..utils.validation import (
     LinkTypeInput,
     NumericIdInput,
     ValidationError,
+    build_response,
     validate_issue_key,
 )
 
@@ -61,11 +63,11 @@ async def get_link_types() -> dict[str, Any]:
                 }
             )
 
-        response = {
-            "success": True,
-            "total": len(link_types),
-            "link_types": link_types,
-        }
+        response = build_response(
+            True,
+            total=len(link_types),
+            link_types=link_types,
+        )
 
         # Cache the response
         if cache:
@@ -73,10 +75,10 @@ async def get_link_types() -> dict[str, Any]:
 
         return response
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error getting link types")
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Create a link between two JIRA issues.")
@@ -106,23 +108,23 @@ async def create_link(
             "outwardIssue": {"key": outward_issue},
         }
         await jira.post("/rest/api/3/issueLink", body=body)
-        return {
-            "success": True,
-            "inward_issue": inward_issue,
-            "outward_issue": outward_issue,
-            "link_type": validated_link_type.link_type,
-        }
+        return build_response(
+            True,
+            inward_issue=inward_issue,
+            outward_issue=outward_issue,
+            link_type=validated_link_type.link_type,
+        )
     except ValidationError as e:
-        return {"success": False, "error": str(e), "field": e.field}
+        return build_response(False, error=str(e), field=e.field)
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "link_type"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="link_type")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception(
             "Unexpected error creating link between %s and %s", inward_issue, outward_issue
         )
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")
 
 
 @mcp.tool(description="Delete an issue link by its ID.")
@@ -135,14 +137,14 @@ async def delete_link(
         validated_id = NumericIdInput(id=link_id)
 
         await jira.delete(f"/rest/api/3/issueLink/{validated_id.id}")
-        return {
-            "success": True,
-            "deleted_link_id": validated_id.id,
-        }
+        return build_response(
+            True,
+            deleted_link_id=validated_id.id,
+        )
     except PydanticValidationError as e:
-        return {"success": False, "error": str(e.errors()[0]["msg"]), "field": "link_id"}
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="link_id")
     except JiraError as e:
-        return {"success": False, "error": str(e), "status_code": e.status_code}
+        return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error deleting link %s", link_id)
-        return {"success": False, "error": "Internal error occurred"}
+        return build_response(False, error="Internal error occurred")

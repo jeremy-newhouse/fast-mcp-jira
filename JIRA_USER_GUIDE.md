@@ -22,6 +22,105 @@ This guide provides comprehensive documentation for using the Fast MCP JIRA tool
 
 ---
 
+## Markdown Formatting
+
+Issue descriptions and comments support markdown that automatically converts to JIRA's Atlassian Document Format (ADF).
+
+### Supported Markdown Features
+
+| Feature | Syntax | Example |
+|---------|--------|---------|
+| **Bold** | `**text**` | **bold text** |
+| **Italic** | `*text*` or `_text_` | *italic text* |
+| **Inline code** | `` `code` `` | `inline code` |
+| **Headings** | `# H1`, `## H2`, `### H3` | Headings 1-6 |
+| **Bullet lists** | `- item` or `* item` | Bulleted list |
+| **Numbered lists** | `1. item` | Numbered list |
+| **Checklists** | `[] task` or `[x] done` | Task list |
+| **Code blocks** | ` ```language ` | Syntax-highlighted code |
+
+### Code Block Languages
+
+Supported syntax highlighting languages include:
+`python`, `javascript`, `typescript`, `java`, `go`, `rust`, `ruby`, `php`, `csharp`, `cpp`, `c`, `bash`, `shell`, `sql`, `json`, `yaml`, `xml`, `html`, `css`, `markdown`, and [many more](https://confluence.atlassian.com/doc/code-block-macro-139390.html).
+
+### Example: Full-Featured Description
+
+```
+**Bug Report: Login Page Timeout**
+
+This issue affects all users trying to log in during peak hours.
+
+## Environment
+- **Browser:** Chrome 120
+- **OS:** macOS Sonoma
+
+## Steps to Reproduce
+1. Navigate to /login
+2. Enter valid credentials
+3. Wait 30+ seconds
+4. Observe 504 Gateway Timeout error
+
+## Expected vs Actual
+- **Expected:** Login completes within 5 seconds
+- **Actual:** Request times out after 30 seconds
+
+## Technical Details
+
+The issue appears to be in the authentication service:
+
+```python
+async def authenticate(username: str, password: str):
+    # This query is missing an index
+    user = await db.query("SELECT * FROM users WHERE email = ?", username)
+    return verify_password(password, user.password_hash)
+```
+
+## Checklist
+[] Verify database indexes
+[x] Confirmed reproduction steps
+[] Deploy fix to staging
+```
+
+### Example: Using Markdown in Code
+
+```python
+# Create issue with markdown description
+create_issue(
+    project_key="PROJ",
+    summary="Fix database query performance",
+    description="""**Problem:** Slow authentication queries
+
+## Analysis
+The `users` table is missing an index on the `email` column.
+
+## Solution
+```sql
+CREATE INDEX idx_users_email ON users(email);
+```
+
+## Testing
+- [ ] Run migration on staging
+- [ ] Verify query performance
+- [ ] Load test with 1000 concurrent users
+"""
+)
+
+# Add markdown comment
+add_comment(
+    issue_key="PROJ-123",
+    body="""**Investigation Complete**
+
+Root cause identified:
+1. Missing database index
+2. N+1 query in auth middleware
+
+*Fix deployed to staging for testing.*"""
+)
+```
+
+---
+
 ## Tool Reference
 
 ### Issue Management
@@ -748,8 +847,12 @@ Common errors:
 - `status_code: 401` - Invalid credentials or API key
 - `status_code: 403` - Permission denied
 - `status_code: 404` - Issue/resource not found
+- `status_code: 429` - Rate limited (server will auto-retry)
 - `field: "jql"` - Invalid JQL syntax
 - `field: "filename"` - Invalid filename (path traversal blocked)
+- `field: "expand"` - Invalid expand parameter
+- `field: "order_by"` - Invalid order_by parameter
+- `field: "datetime"` - Invalid ISO 8601 datetime format
 
 ---
 
@@ -769,3 +872,60 @@ The server uses JIRA Cloud API tokens for authentication. Configure in `.env`:
 - `JIRA_URL`: Your Atlassian domain (e.g., `mycompany.atlassian.net`)
 - `JIRA_EMAIL`: Your Atlassian account email
 - `JIRA_API_TOKEN`: API token from [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens)
+
+---
+
+## Security Features
+
+The server includes several security hardening measures:
+
+### Input Validation
+
+All inputs are validated before being sent to JIRA:
+
+| Field | Validation |
+|-------|------------|
+| `issue_key` | Format: `PROJECT-123` (uppercase) |
+| `project_key` | Uppercase letters/numbers, max 10 chars |
+| `jql` | Checked for SQL injection patterns, max 10,000 chars |
+| `filename` | Path traversal blocked, dangerous extensions blocked |
+| `expand` | Whitelist of allowed JIRA expand fields |
+| `order_by` | Whitelist of allowed order fields |
+| `datetime` | ISO 8601 format validation |
+
+### SSRF Prevention
+
+JIRA URLs are validated to block internal/private network access:
+- Private IP ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+- Loopback (127.x.x.x, localhost)
+- Link-local (169.254.x.x)
+
+### Response Sanitization
+
+All tool responses are sanitized to prevent XSS. User-provided content is escaped before being returned.
+
+### Rate Limiting
+
+- Client-side: 10 requests/second with burst of 20
+- Server-side: Automatic retry with Retry-After header for HTTP 429 responses
+
+### Response Size Limits
+
+API responses are limited to 50MB to prevent memory exhaustion.
+
+### Cache Encryption
+
+Optional SQLCipher encryption for the cache database:
+
+```bash
+# Generate a key file (recommended)
+mkdir -p ~/.fast-mcp-jira && chmod 700 ~/.fast-mcp-jira
+openssl rand -base64 32 > ~/.fast-mcp-jira/cache.key
+chmod 600 ~/.fast-mcp-jira/cache.key
+
+# Configure in .env
+CACHE_ENCRYPTION_ENABLED=true
+CACHE_ENCRYPTION_KEY_FILE=~/.fast-mcp-jira/cache.key
+```
+
+**Note:** Cache database and key files are excluded from git via `.gitignore`.
