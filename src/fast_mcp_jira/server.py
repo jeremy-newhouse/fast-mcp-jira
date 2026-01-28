@@ -25,4 +25,15 @@ mcp = FastMCP(
 
 # Import and register all tools
 # These imports have side effects (tool registration via decorators)
-from .tools import agile, attachments, comments, generic, issues, worklogs  # noqa: E402, F401
+from .tools import (  # noqa: E402, F401
+    agile,
+    attachments,
+    comments,
+    generic,
+    issues,
+    links,
+    metadata,
+    projects,
+    watchers,
+    worklogs,
+)

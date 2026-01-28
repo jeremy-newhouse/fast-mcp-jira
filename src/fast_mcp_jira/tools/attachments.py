@@ -82,3 +82,48 @@ async def delete_attachment(
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@mcp.tool(description="Add an attachment to a JIRA issue.")
+async def add_attachment(
+    issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
+    filename: Annotated[str, Field(description="Name of the file to attach")],
+    content_base64: Annotated[str, Field(description="Base64-encoded file content")],
+    content_type: Annotated[
+        str, Field(description="MIME type of the file (e.g., 'text/plain', 'image/png')")
+    ] = "application/octet-stream",
+) -> dict[str, Any]:
+    """Add an attachment to an issue.
+
+    The file content must be provided as a base64-encoded string.
+    """
+    import base64 as b64
+
+    try:
+        content = b64.b64decode(content_base64)
+        result = await jira.post_multipart(
+            f"/rest/api/3/issue/{issue_key}/attachments",
+            filename=filename,
+            content=content,
+            content_type=content_type,
+        )
+
+        # Result is a list of created attachments
+        attachments = result if isinstance(result, list) else [result]
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "attachments": [
+                {
+                    "id": a.get("id"),
+                    "filename": a.get("filename"),
+                    "size": a.get("size"),
+                    "mime_type": a.get("mimeType"),
+                }
+                for a in attachments
+            ],
+        }
+    except JiraError as e:
+        return {"success": False, "error": str(e), "status_code": e.status_code}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

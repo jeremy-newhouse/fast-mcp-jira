@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Server configuration
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 5472  # JIRA on phone keypad: J=5, I=4, R=7, A=2
 
     # Logging
     log_level: str = "INFO"

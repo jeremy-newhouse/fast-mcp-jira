@@ -42,7 +42,7 @@ async def jira_get(
     path: Annotated[str, Field(description="API path (e.g., /rest/api/3/project)")],
     query_params: Annotated[
         str | None,
-        Field(description="Query parameters as key=value pairs separated by & (e.g., maxResults=50&startAt=0)"),
+        Field(description="Query params as key=value pairs separated by & (e.g., maxResults=50)"),
     ] = None,
 ) -> dict[str, Any]:
     """Make a GET request to any JIRA API endpoint."""
@@ -107,7 +107,9 @@ async def jira_put(
 
 @mcp.tool(
     description="Make a PATCH request to any JIRA API endpoint. "
-    "Use this to partially update a resource."
+    "Note: JIRA has limited PATCH support - most endpoints use PUT instead. "
+    "For issue updates, use update_issue or jira_put. "
+    "PATCH is primarily supported for bulk operations."
 )
 async def jira_patch(
     path: Annotated[str, Field(description="API path (e.g., /rest/api/3/issue/PROJ-123)")],
@@ -128,8 +130,7 @@ async def jira_patch(
 
 
 @mcp.tool(
-    description="Make a DELETE request to any JIRA API endpoint. "
-    "Use this to remove resources."
+    description="Make a DELETE request to any JIRA API endpoint. Use this to remove resources."
 )
 async def jira_delete(
     path: Annotated[str, Field(description="API path (e.g., /rest/api/3/issue/PROJ-123)")],

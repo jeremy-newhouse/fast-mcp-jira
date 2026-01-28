@@ -111,9 +111,7 @@ class JiraClient:
             self._handle_error(response)
         return response.json() if response.content else {}
 
-    async def put(
-        self, path: str, body: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def put(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a PUT request to JIRA API."""
         logger.debug("PUT %s body=%s", path, body)
         response = await self.client.put(path, json=body)
@@ -121,9 +119,7 @@ class JiraClient:
             self._handle_error(response)
         return response.json() if response.content else {}
 
-    async def patch(
-        self, path: str, body: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def patch(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a PATCH request to JIRA API."""
         logger.debug("PATCH %s body=%s", path, body)
         response = await self.client.patch(path, json=body)
@@ -131,10 +127,36 @@ class JiraClient:
             self._handle_error(response)
         return response.json() if response.content else {}
 
-    async def delete(self, path: str) -> dict[str, Any]:
+    async def delete(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a DELETE request to JIRA API."""
-        logger.debug("DELETE %s", path)
-        response = await self.client.delete(path)
+        logger.debug("DELETE %s params=%s", path, params)
+        response = await self.client.delete(path, params=params)
+        if not response.is_success:
+            self._handle_error(response)
+        return response.json() if response.content else {}
+
+    async def post_multipart(
+        self,
+        path: str,
+        filename: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        """Make a multipart POST request for file uploads."""
+        logger.debug("POST multipart %s filename=%s", path, filename)
+        files = {"file": (filename, content, content_type)}
+        # Need to override content-type header for multipart
+        headers = {
+            "Authorization": self._get_auth_header(),
+            "Accept": "application/json",
+            "X-Atlassian-Token": "no-check",  # Required for attachment uploads
+        }
+        async with httpx.AsyncClient(
+            base_url=self.settings.base_url,
+            verify=self.settings.jira_ssl_verify,
+            timeout=60.0,
+        ) as client:
+            response = await client.post(path, files=files, headers=headers)
         if not response.is_success:
             self._handle_error(response)
         return response.json() if response.content else {}

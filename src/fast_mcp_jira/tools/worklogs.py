@@ -6,20 +6,8 @@ from pydantic import Field
 
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
-
-
-def _build_adf_text(text: str) -> dict[str, Any]:
-    """Build Atlassian Document Format (ADF) structure for text content."""
-    return {
-        "type": "doc",
-        "version": 1,
-        "content": [
-            {
-                "type": "paragraph",
-                "content": [{"type": "text", "text": text}],
-            }
-        ],
-    }
+from ..utils.adf import extract_text_from_adf, markdown_to_adf
+from ..utils.validation import ValidationError, validate_issue_key
 
 
 @mcp.tool(description="Log time spent on a JIRA issue.")
@@ -30,19 +18,22 @@ async def add_worklog(
         Field(description="Time spent in JIRA format (e.g., '2h 30m', '1d', '3h')"),
     ],
     comment: Annotated[
-        str | None, Field(description="Optional comment describing the work")
+        str | None,
+        Field(description="Optional comment describing the work. Supports markdown."),
     ] = None,
     started: Annotated[
         str | None,
-        Field(description="When work started in ISO 8601 format (e.g., '2024-01-15T09:00:00.000+0000')"),
+        Field(description="When work started (ISO 8601, e.g., 2024-01-15T09:00:00.000+0000)"),
     ] = None,
 ) -> dict[str, Any]:
     """Add a worklog entry to an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
+
         body: dict[str, Any] = {"timeSpent": time_spent}
 
         if comment:
-            body["comment"] = _build_adf_text(comment)
+            body["comment"] = markdown_to_adf(comment)
 
         if started:
             body["started"] = started
@@ -60,6 +51,8 @@ async def add_worklog(
             "author": result.get("author", {}).get("displayName"),
             "started": result.get("started"),
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -72,12 +65,12 @@ async def get_worklogs(
     max_results: Annotated[
         int, Field(description="Maximum number of worklogs to return", ge=1, le=100)
     ] = 50,
-    start_at: Annotated[
-        int, Field(description="Index of the first worklog to return", ge=0)
-    ] = 0,
+    start_at: Annotated[int, Field(description="Index of the first worklog to return", ge=0)] = 0,
 ) -> dict[str, Any]:
     """Get worklogs for an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
+
         params = {
             "maxResults": max_results,
             "startAt": start_at,
@@ -88,25 +81,22 @@ async def get_worklogs(
         )
         worklogs = []
         for w in result.get("worklogs", []):
-            # Extract plain text from ADF comment if possible
-            comment_text = ""
+            # Extract plain text from ADF comment
             comment = w.get("comment", {})
-            if isinstance(comment, dict):
-                for content in comment.get("content", []):
-                    for item in content.get("content", []):
-                        if item.get("type") == "text":
-                            comment_text += item.get("text", "")
+            comment_text = extract_text_from_adf(comment) if isinstance(comment, dict) else None
 
-            worklogs.append({
-                "id": w.get("id"),
-                "time_spent": w.get("timeSpent"),
-                "time_spent_seconds": w.get("timeSpentSeconds"),
-                "comment": comment_text or None,
-                "author": w.get("author", {}).get("displayName"),
-                "started": w.get("started"),
-                "created": w.get("created"),
-                "updated": w.get("updated"),
-            })
+            worklogs.append(
+                {
+                    "id": w.get("id"),
+                    "time_spent": w.get("timeSpent"),
+                    "time_spent_seconds": w.get("timeSpentSeconds"),
+                    "comment": comment_text or None,
+                    "author": w.get("author", {}).get("displayName"),
+                    "started": w.get("started"),
+                    "created": w.get("created"),
+                    "updated": w.get("updated"),
+                }
+            )
 
         return {
             "success": True,
@@ -114,6 +104,8 @@ async def get_worklogs(
             "total": result.get("total"),
             "worklogs": worklogs,
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -127,12 +119,16 @@ async def delete_worklog(
 ) -> dict[str, Any]:
     """Delete a worklog entry from an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
+
         await jira.delete(f"/rest/api/3/issue/{issue_key}/worklog/{worklog_id}")
         return {
             "success": True,
             "deleted_worklog_id": worklog_id,
             "issue_key": issue_key,
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

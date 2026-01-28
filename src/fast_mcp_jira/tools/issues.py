@@ -6,44 +6,43 @@ from pydantic import Field
 
 from ..server import jira, mcp
 from ..services.jira_client import JiraError
-
-
-def _build_adf_text(text: str) -> dict[str, Any]:
-    """Build Atlassian Document Format (ADF) structure for text content."""
-    return {
-        "type": "doc",
-        "version": 1,
-        "content": [
-            {
-                "type": "paragraph",
-                "content": [{"type": "text", "text": text}],
-            }
-        ],
-    }
+from ..utils.adf import markdown_to_adf
+from ..utils.validation import (
+    ValidationError,
+    validate_issue_key,
+    validate_labels,
+    validate_project_key,
+    validate_summary,
+)
 
 
 @mcp.tool(description="Create a new JIRA issue.")
 async def create_issue(
     project_key: Annotated[str, Field(description="Project key (e.g., PROJ)")],
-    summary: Annotated[str, Field(description="Issue summary/title")],
+    summary: Annotated[str, Field(description="Issue summary/title (max 255 chars)")],
     issue_type: Annotated[
         str, Field(description="Issue type name (e.g., Bug, Task, Story, Epic)")
     ] = "Task",
     description: Annotated[
-        str | None, Field(description="Issue description (plain text)")
+        str | None,
+        Field(
+            description="Issue description. Supports markdown: **bold**, *italic*, "
+            "- bullet lists, 1. numbered lists, [] checklists, ```code blocks```"
+        ),
     ] = None,
     priority: Annotated[
         str | None, Field(description="Priority name (e.g., High, Medium, Low)")
     ] = None,
-    labels: Annotated[
-        list[str] | None, Field(description="List of labels to apply")
-    ] = None,
-    assignee: Annotated[
-        str | None, Field(description="Assignee account ID")
-    ] = None,
+    labels: Annotated[list[str] | None, Field(description="List of labels to apply")] = None,
+    assignee: Annotated[str | None, Field(description="Assignee account ID")] = None,
 ) -> dict[str, Any]:
     """Create a new issue in JIRA."""
     try:
+        # Validate inputs
+        project_key = validate_project_key(project_key)
+        summary = validate_summary(summary)
+        labels = validate_labels(labels)
+
         fields: dict[str, Any] = {
             "project": {"key": project_key},
             "summary": summary,
@@ -51,7 +50,7 @@ async def create_issue(
         }
 
         if description:
-            fields["description"] = _build_adf_text(description)
+            fields["description"] = markdown_to_adf(description)
 
         if priority:
             fields["priority"] = {"name": priority}
@@ -69,6 +68,8 @@ async def create_issue(
             "issue_id": result.get("id"),
             "self": result.get("self"),
         }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -80,7 +81,7 @@ async def get_issue(
     issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
     fields: Annotated[
         str | None,
-        Field(description="Comma-separated list of fields to return (e.g., summary,status,assignee)"),
+        Field(description="Comma-separated fields to return (e.g., summary,status,assignee)"),
     ] = None,
     expand: Annotated[
         str | None,
@@ -89,6 +90,7 @@ async def get_issue(
 ) -> dict[str, Any]:
     """Get issue details by key."""
     try:
+        issue_key = validate_issue_key(issue_key)
         params: dict[str, str] = {}
         if fields:
             params["fields"] = fields
@@ -100,6 +102,8 @@ async def get_issue(
             params=params if params else None,
         )
         return {"success": True, "issue": result}
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -108,35 +112,37 @@ async def get_issue(
 
 @mcp.tool(description="Search for JIRA issues using JQL (JIRA Query Language).")
 async def search_issues(
-    jql: Annotated[str, Field(description="JQL query string (e.g., project=PROJ AND status='In Progress')")],
+    jql: Annotated[
+        str, Field(description="JQL query string (e.g., project=PROJ AND status='In Progress')")
+    ],
     fields: Annotated[
         str | None,
-        Field(description="Comma-separated list of fields to return (default: key,summary,status,assignee,priority)"),
+        Field(description="Comma-separated fields (default: key,summary,status,assignee,priority)"),
     ] = "key,summary,status,assignee,priority",
     max_results: Annotated[
         int, Field(description="Maximum number of results to return", ge=1, le=100)
     ] = 50,
-    start_at: Annotated[
-        int, Field(description="Index of the first result to return", ge=0)
-    ] = 0,
+    next_page_token: Annotated[
+        str | None, Field(description="Token for fetching next page of results")
+    ] = None,
 ) -> dict[str, Any]:
-    """Search for issues using JQL."""
+    """Search for issues using JQL with cursor-based pagination."""
     try:
         params: dict[str, Any] = {
             "jql": jql,
             "maxResults": max_results,
-            "startAt": start_at,
         }
         if fields:
             params["fields"] = fields
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
 
-        result = await jira.get("/rest/api/3/search", params=params)
+        result = await jira.get("/rest/api/3/search/jql", params=params)
         return {
             "success": True,
-            "total": result.get("total"),
-            "start_at": result.get("startAt"),
-            "max_results": result.get("maxResults"),
             "issues": result.get("issues", []),
+            "next_page_token": result.get("nextPageToken"),
+            "is_last": result.get("isLast", True),
         }
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
@@ -147,9 +153,13 @@ async def search_issues(
 @mcp.tool(description="Update fields on an existing JIRA issue.")
 async def update_issue(
     issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
-    summary: Annotated[str | None, Field(description="New summary/title")] = None,
+    summary: Annotated[str | None, Field(description="New summary/title (max 255 chars)")] = None,
     description: Annotated[
-        str | None, Field(description="New description (plain text)")
+        str | None,
+        Field(
+            description="New description. Supports markdown: **bold**, *italic*, "
+            "- bullet lists, 1. numbered lists, [] checklists, ```code blocks```"
+        ),
     ] = None,
     priority: Annotated[
         str | None, Field(description="New priority name (e.g., High, Medium, Low)")
@@ -163,19 +173,24 @@ async def update_issue(
 ) -> dict[str, Any]:
     """Update issue fields."""
     try:
+        # Validate issue key
+        issue_key = validate_issue_key(issue_key)
+
         fields: dict[str, Any] = {}
 
         if summary is not None:
+            summary = validate_summary(summary)
             fields["summary"] = summary
 
         if description is not None:
-            fields["description"] = _build_adf_text(description)
+            fields["description"] = markdown_to_adf(description)
 
         if priority is not None:
             fields["priority"] = {"name": priority}
 
         if labels is not None:
-            fields["labels"] = labels
+            labels = validate_labels(labels)
+            fields["labels"] = labels if labels else []
 
         if assignee is not None:
             if assignee == "":
@@ -188,6 +203,8 @@ async def update_issue(
 
         await jira.put(f"/rest/api/3/issue/{issue_key}", body={"fields": fields})
         return {"success": True, "issue_key": issue_key, "updated_fields": list(fields.keys())}
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -203,12 +220,15 @@ async def delete_issue(
 ) -> dict[str, Any]:
     """Delete an issue."""
     try:
+        issue_key = validate_issue_key(issue_key)
         path = f"/rest/api/3/issue/{issue_key}"
         if delete_subtasks:
             path += "?deleteSubtasks=true"
 
         await jira.delete(path)
         return {"success": True, "deleted": issue_key}
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:
@@ -219,7 +239,7 @@ async def delete_issue(
 async def transition_issue(
     issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
     transition_id: Annotated[
-        str | None, Field(description="Transition ID to execute (use get_transitions to find available IDs)")
+        str | None, Field(description="Transition ID to execute (from get_transitions)")
     ] = None,
     transition_name: Annotated[
         str | None, Field(description="Transition name to execute (e.g., 'Done', 'In Progress')")
@@ -227,6 +247,8 @@ async def transition_issue(
 ) -> dict[str, Any]:
     """Transition an issue to a new status."""
     try:
+        issue_key = validate_issue_key(issue_key)
+
         if not transition_id and not transition_name:
             # Return available transitions
             result = await jira.get(f"/rest/api/3/issue/{issue_key}/transitions")
@@ -260,6 +282,90 @@ async def transition_issue(
             body={"transition": {"id": transition_id}},
         )
         return {"success": True, "issue_key": issue_key, "transition_id": transition_id}
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
+    except JiraError as e:
+        return {"success": False, "error": str(e), "status_code": e.status_code}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool(description="Get available transitions for a JIRA issue.")
+async def get_transitions(
+    issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
+) -> dict[str, Any]:
+    """Get available workflow transitions for an issue."""
+    try:
+        issue_key = validate_issue_key(issue_key)
+        result = await jira.get(f"/rest/api/3/issue/{issue_key}/transitions")
+        transitions = result.get("transitions", [])
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "transitions": [
+                {
+                    "id": t["id"],
+                    "name": t["name"],
+                    "to_status": t.get("to", {}).get("name"),
+                    "to_status_category": t.get("to", {}).get("statusCategory", {}).get("name"),
+                }
+                for t in transitions
+            ],
+        }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
+    except JiraError as e:
+        return {"success": False, "error": str(e), "status_code": e.status_code}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool(description="Get changelog/history for a JIRA issue.")
+async def get_changelog(
+    issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
+    max_results: Annotated[
+        int, Field(description="Maximum number of changelog entries to return", ge=1, le=100)
+    ] = 50,
+    start_at: Annotated[
+        int, Field(description="Index of the first changelog entry to return", ge=0)
+    ] = 0,
+) -> dict[str, Any]:
+    """Get issue changelog showing field changes over time."""
+    try:
+        issue_key = validate_issue_key(issue_key)
+        params = {"maxResults": max_results, "startAt": start_at}
+        result = await jira.get(f"/rest/api/3/issue/{issue_key}/changelog", params=params)
+
+        histories = []
+        for history in result.get("values", []):
+            changes = []
+            for item in history.get("items", []):
+                changes.append(
+                    {
+                        "field": item.get("field"),
+                        "from": item.get("fromString"),
+                        "to": item.get("toString"),
+                    }
+                )
+            histories.append(
+                {
+                    "id": history.get("id"),
+                    "author": history.get("author", {}).get("displayName"),
+                    "created": history.get("created"),
+                    "changes": changes,
+                }
+            )
+
+        return {
+            "success": True,
+            "issue_key": issue_key,
+            "total": result.get("total", len(histories)),
+            "start_at": result.get("startAt", start_at),
+            "max_results": result.get("maxResults", max_results),
+            "histories": histories,
+        }
+    except ValidationError as e:
+        return {"success": False, "error": str(e), "field": e.field}
     except JiraError as e:
         return {"success": False, "error": str(e), "status_code": e.status_code}
     except Exception as e:

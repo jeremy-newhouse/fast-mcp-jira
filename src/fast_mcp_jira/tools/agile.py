@@ -13,22 +13,16 @@ AGILE_BASE = "/rest/agile/1.0"
 
 @mcp.tool(description="List all JIRA boards (Scrum/Kanban) with optional filtering.")
 async def get_boards(
-    project_key: Annotated[
-        str | None, Field(description="Filter boards by project key")
-    ] = None,
+    project_key: Annotated[str | None, Field(description="Filter boards by project key")] = None,
     board_type: Annotated[
         str | None,
         Field(description="Filter by board type: 'scrum', 'kanban', or 'simple'"),
     ] = None,
-    name: Annotated[
-        str | None, Field(description="Filter boards by name (partial match)")
-    ] = None,
+    name: Annotated[str | None, Field(description="Filter boards by name (partial match)")] = None,
     max_results: Annotated[
         int, Field(description="Maximum number of boards to return", ge=1, le=100)
     ] = 50,
-    start_at: Annotated[
-        int, Field(description="Index of the first board to return", ge=0)
-    ] = 0,
+    start_at: Annotated[int, Field(description="Index of the first board to return", ge=0)] = 0,
 ) -> dict[str, Any]:
     """List all boards."""
     try:
@@ -46,15 +40,17 @@ async def get_boards(
         result = await jira.get(f"{AGILE_BASE}/board", params=params)
         boards = []
         for b in result.get("values", []):
-            boards.append({
-                "id": b.get("id"),
-                "name": b.get("name"),
-                "type": b.get("type"),
-                "location": {
-                    "project_key": b.get("location", {}).get("projectKey"),
-                    "project_name": b.get("location", {}).get("projectName"),
-                },
-            })
+            boards.append(
+                {
+                    "id": b.get("id"),
+                    "name": b.get("name"),
+                    "type": b.get("type"),
+                    "location": {
+                        "project_key": b.get("location", {}).get("projectKey"),
+                        "project_name": b.get("location", {}).get("projectName"),
+                    },
+                }
+            )
 
         return {
             "success": True,
@@ -105,9 +101,7 @@ async def get_sprints(
     max_results: Annotated[
         int, Field(description="Maximum number of sprints to return", ge=1, le=100)
     ] = 50,
-    start_at: Annotated[
-        int, Field(description="Index of the first sprint to return", ge=0)
-    ] = 0,
+    start_at: Annotated[int, Field(description="Index of the first sprint to return", ge=0)] = 0,
 ) -> dict[str, Any]:
     """Get sprints for a board."""
     try:
@@ -121,15 +115,17 @@ async def get_sprints(
         result = await jira.get(f"{AGILE_BASE}/board/{board_id}/sprint", params=params)
         sprints = []
         for s in result.get("values", []):
-            sprints.append({
-                "id": s.get("id"),
-                "name": s.get("name"),
-                "state": s.get("state"),
-                "start_date": s.get("startDate"),
-                "end_date": s.get("endDate"),
-                "complete_date": s.get("completeDate"),
-                "goal": s.get("goal"),
-            })
+            sprints.append(
+                {
+                    "id": s.get("id"),
+                    "name": s.get("name"),
+                    "state": s.get("state"),
+                    "start_date": s.get("startDate"),
+                    "end_date": s.get("endDate"),
+                    "complete_date": s.get("completeDate"),
+                    "goal": s.get("goal"),
+                }
+            )
 
         return {
             "success": True,
@@ -149,7 +145,7 @@ async def get_sprint_issues(
     sprint_id: Annotated[int, Field(description="Sprint ID")],
     fields: Annotated[
         str | None,
-        Field(description="Comma-separated list of fields to return (e.g., summary,status,assignee)"),
+        Field(description="Comma-separated fields to return (e.g., summary,status,assignee)"),
     ] = "summary,status,assignee,priority",
     jql: Annotated[
         str | None,
@@ -158,9 +154,7 @@ async def get_sprint_issues(
     max_results: Annotated[
         int, Field(description="Maximum number of issues to return", ge=1, le=100)
     ] = 50,
-    start_at: Annotated[
-        int, Field(description="Index of the first issue to return", ge=0)
-    ] = 0,
+    start_at: Annotated[int, Field(description="Index of the first issue to return", ge=0)] = 0,
 ) -> dict[str, Any]:
     """Get issues in a sprint."""
     try:
