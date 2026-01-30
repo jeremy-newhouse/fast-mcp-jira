@@ -882,3 +882,58 @@ def validate_datetime(datetime_str: str) -> str:
         return validated.datetime
     except ValueError as e:
         raise ValidationError("datetime", str(e))
+
+
+class RemoteLinkUrlInput(BaseModel):
+    """Validated URL for remote links.
+
+    Security features:
+    - Only http and https protocols allowed
+    - Maximum length of 2000 characters
+    - Basic URL format validation
+
+    Example:
+        >>> validated = RemoteLinkUrlInput(url="https://example.com/page")
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    url: str = Field(..., max_length=2000, description="Remote link URL")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Validate URL format and protocol."""
+        v = v.strip()
+        if not v:
+            raise ValueError("URL cannot be empty")
+
+        # Only allow http and https
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+
+        # Basic URL format check
+        url_pattern = r"^https?://[^\s/$.?#].[^\s]*$"
+        if not re.match(url_pattern, v):
+            raise ValueError("Invalid URL format")
+
+        return v
+
+
+def validate_remote_link_url(url: str) -> str:
+    """Validate URL for remote links.
+
+    Args:
+        url: URL to validate.
+
+    Returns:
+        The validated URL.
+
+    Raises:
+        ValidationError: If the URL is invalid.
+    """
+    try:
+        validated = RemoteLinkUrlInput(url=url)
+        return validated.url
+    except ValueError as e:
+        raise ValidationError("url", str(e))

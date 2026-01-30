@@ -133,6 +133,7 @@ from .tools import (  # noqa: E402, F401
     links,
     metadata,
     projects,
+    remote_links,
     watchers,
     worklogs,
 )
