@@ -937,3 +937,41 @@ def validate_remote_link_url(url: str) -> str:
         return validated.url
     except ValueError as e:
         raise ValidationError("url", str(e))
+
+
+def validate_custom_fields(custom_fields: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate custom fields dictionary.
+
+    Ensures all field names follow the customfield_XXXXX format.
+
+    Args:
+        custom_fields: Dictionary of custom field ID to value mappings.
+
+    Returns:
+        The validated custom fields dictionary or None.
+
+    Raises:
+        ValidationError: If any custom field name is invalid.
+
+    Example:
+        >>> validate_custom_fields({"customfield_10001": "value"})
+        {"customfield_10001": "value"}
+    """
+    if not custom_fields:
+        return custom_fields
+
+    for field_name in custom_fields.keys():
+        if not field_name.startswith("customfield_"):
+            raise ValidationError(
+                "custom_fields",
+                f"Field '{field_name}' is not a custom field. "
+                "Custom field names must start with 'customfield_'",
+            )
+        if not re.match(r"^customfield_\d+$", field_name):
+            raise ValidationError(
+                "custom_fields",
+                f"Invalid custom field format: '{field_name}'. "
+                "Expected format: customfield_XXXXX (where X is a digit)",
+            )
+
+    return custom_fields

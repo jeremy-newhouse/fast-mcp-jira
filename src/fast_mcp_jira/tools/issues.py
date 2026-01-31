@@ -31,6 +31,7 @@ from ..utils.validation import (
     JqlInput,
     ValidationError,
     build_response,
+    validate_custom_fields,
     validate_expand,
     validate_issue_key,
     validate_labels,
@@ -256,6 +257,13 @@ async def update_issue(
         str | None,
         Field(description="Parent issue key (e.g., PROJ-123). Use empty string to remove parent."),
     ] = None,
+    custom_fields: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description="Custom fields to update. Keys must be customfield_XXXXX format. "
+            'Example: {"customfield_10001": "value", "customfield_10002": {"id": "123"}}'
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """Update issue fields."""
     try:
@@ -285,6 +293,12 @@ async def update_issue(
             else:
                 parent = validate_issue_key(parent)
                 fields["parent"] = {"key": parent}
+
+        # Handle custom fields
+        if custom_fields is not None:
+            validated_custom = validate_custom_fields(custom_fields)
+            if validated_custom:
+                fields.update(validated_custom)
 
         if not fields:
             return build_response(False, error="No fields to update")
