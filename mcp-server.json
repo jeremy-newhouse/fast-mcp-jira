@@ -1,0 +1,27 @@
+{
+  "name": "Fast MCP JIRA",
+  "version": "0.1.0",
+  "fastmcp": ">=3.0.0",
+  "env_vars": [
+    {
+      "name": "JIRA_URL",
+      "display_name": "Jira Instance URL",
+      "required": true,
+      "description": "Your Jira Cloud URL (e.g., https://company.atlassian.net)",
+      "validation": "^https?://.+\\.atlassian\\.net$"
+    },
+    {
+      "name": "JIRA_EMAIL",
+      "display_name": "Jira Email",
+      "required": true,
+      "description": "Email address for Jira API authentication"
+    },
+    {
+      "name": "JIRA_API_TOKEN",
+      "display_name": "Jira API Token",
+      "required": true,
+      "sensitive": true,
+      "description": "API token from id.atlassian.com"
+    }
+  ]
+}
