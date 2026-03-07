@@ -32,12 +32,13 @@ cache: CacheService | None = None
 if settings.cache_enabled:
     cache = CacheService(settings)
 
-# Configure authentication if API key is set
+# Configure authentication if API key is set and auth is enabled
 auth_provider = None
-if settings.mcp_api_key:
+if settings.mcp_api_key and settings.mcp_auth_enabled:
     auth_provider = ApiKeyVerifier(api_key=settings.mcp_api_key)
+elif not settings.mcp_auth_enabled:
+    logger.warning("MCP_AUTH_ENABLED=false - endpoint is UNAUTHENTICATED")
 else:
-    # Security warning: unauthenticated access
     logger.warning(
         "MCP_API_KEY not set - endpoint is UNAUTHENTICATED. "
         "Set MCP_API_KEY environment variable for production deployments."
