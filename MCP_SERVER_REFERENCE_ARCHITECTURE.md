@@ -2053,7 +2053,7 @@ version = "0.1.0"
 description = "MCP server for Your API"
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=3.0.0b1,<4.0.0",
+    "fastmcp>=3.4.4,<4.0.0",
     "httpx>=0.28.0,<1.0.0",
     "pydantic>=2.0,<3.0",
     "pydantic-settings>=2.0,<3.0",
