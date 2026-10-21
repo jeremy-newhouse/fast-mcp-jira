@@ -226,7 +226,7 @@ def _parse_inline_formatting(text: str) -> list[dict]:
         r"(`[^`]+`)|"  # inline code
         r"(\*\*[^*]+\*\*)|"  # bold
         r"(\*[^*]+\*)|"  # italic with *
-        r"(_[^_]+_)"  # italic with _
+        r"((?<!\w)_(?=\S)[^_]+?(?<=\S)_(?!\w))"  # _italic_ at word boundaries
     )
 
     # Map of prefix/suffix to (strip_length, mark_type)
