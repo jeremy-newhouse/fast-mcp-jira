@@ -52,3 +52,30 @@ async def test_update_comment_jira_error(jira_put):
     r = await comments.update_comment(issue_key="SMAI-1", comment_id="1", body="x")
     assert r["success"] is False
     assert r["status_code"] == 404
+
+
+@pytest.mark.parametrize("body", ["", "   ", "a" * 32768])
+async def test_update_comment_bad_body(jira_put, body):
+    r = await comments.update_comment(issue_key="SMAI-1", comment_id="1", body=body)
+    assert r["success"] is False
+    assert r["field"] == "body"
+    jira_put.assert_not_awaited()
+
+
+@pytest.mark.parametrize("comment_id", ["1/../2", "1?x=1", "²", "١٢", "-1", ""])
+async def test_update_comment_rejects_unsafe_comment_id(jira_put, comment_id):
+    r = await comments.update_comment(issue_key="SMAI-1", comment_id=comment_id, body="x")
+    assert r["success"] is False
+    jira_put.assert_not_awaited()
+
+
+@pytest.mark.parametrize("key", ["SMAI-1/../x", "SM-١", "SMAI-1?a=b"])
+async def test_update_comment_rejects_unsafe_issue_key(jira_put, key):
+    r = await comments.update_comment(issue_key=key, comment_id="1", body="x")
+    assert r["success"] is False
+    jira_put.assert_not_awaited()
+
+
+async def test_update_comment_normalizes_inputs(jira_put):
+    await comments.update_comment(issue_key=" smai-2 ", comment_id=" 12 ", body="x")
+    assert jira_put.call_args[0][0] == "/rest/api/3/issue/SMAI-2/comment/12"

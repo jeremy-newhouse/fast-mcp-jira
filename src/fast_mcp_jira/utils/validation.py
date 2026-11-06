@@ -86,7 +86,7 @@ class IssueKeyInput(BaseModel):
     def validate_format(cls, v: str) -> str:
         """Validate and normalize issue key format."""
         v = v.strip().upper()
-        if not re.match(r"^[A-Z][A-Z0-9_]+-\d+$", v):
+        if not re.match(r"^[A-Z][A-Z0-9_]+-[0-9]+$", v):
             raise ValueError(f"Invalid issue key format '{v}'. Expected: PROJECT-123")
         return v
 
@@ -221,7 +221,7 @@ class NumericIdInput(BaseModel):
     def validate_numeric(cls, v: str) -> str:
         """Ensure ID is purely numeric."""
         v = v.strip()
-        if not v.isdigit():
+        if not (v.isascii() and v.isdigit()):
             raise ValueError("ID must be numeric")
         return v
 
