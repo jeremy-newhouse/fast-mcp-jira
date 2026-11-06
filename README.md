@@ -225,7 +225,7 @@ Claude Code will automatically connect to the MCP server.
 
 See [JIRA_USER_GUIDE.md](JIRA_USER_GUIDE.md) for detailed tool documentation and examples.
 
-## Available Tools (47 total)
+## Available Tools (48 total)
 
 ### Issue Tools (8)
 Create, read, update, delete, and transition issues:
@@ -241,12 +241,13 @@ Create, read, update, delete, and transition issues:
 | `get_transitions` | Get available workflow transitions |
 | `get_changelog` | Get issue change history |
 
-### Comment Tools (3)
+### Comment Tools (4)
 
 | Tool | Description |
 |------|-------------|
 | `add_comment` | Add a comment to an issue |
 | `get_comments` | Get comments on an issue |
+| `update_comment` | Edit the body of an existing comment |
 | `delete_comment` | Delete a comment |
 
 ### Worklog Tools (3)

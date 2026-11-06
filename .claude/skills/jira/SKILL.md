@@ -21,6 +21,7 @@ This skill provides access to 47 JIRA tools via MCP. Use the `mcp__jira__*` tool
 | Get transitions | `mcp__jira__get_transitions` | issue_key |
 | Add comment | `mcp__jira__add_comment` | issue_key, body |
 | Get comments | `mcp__jira__get_comments` | issue_key |
+| Update comment | `mcp__jira__update_comment` | issue_key, comment_id, body |
 | List boards | `mcp__jira__get_boards` | project_key (optional) |
 | Get sprints | `mcp__jira__get_sprints` | board_id, state |
 | Sprint issues | `mcp__jira__get_sprint_issues` | sprint_id |
@@ -201,8 +202,8 @@ mcp__jira__bulk_add_comments(
 - create_issue, get_issue, search_issues, update_issue, delete_issue
 - transition_issue, get_transitions, get_changelog
 
-### Comments (3 tools)
-- add_comment, get_comments, delete_comment
+### Comments (4 tools)
+- add_comment, get_comments, update_comment, delete_comment
 
 ### Worklogs (3 tools)
 - add_worklog, get_worklogs, delete_worklog

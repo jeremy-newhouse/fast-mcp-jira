@@ -15,6 +15,7 @@ This guide provides comprehensive documentation for using the Fast MCP JIRA tool
 | `get_transitions` | List available statuses | issue_key |
 | `add_comment` | Add comments | issue_key, body |
 | `get_comments` | List comments | issue_key |
+| `update_comment` | Edit a comment in place | issue_key, comment_id, body |
 | `add_attachment` | Upload files | issue_key, filename, content_base64 |
 | `get_boards` | List Scrum/Kanban boards | - |
 | `get_sprints` | List sprints | board_id |
@@ -332,6 +333,19 @@ Get all comments on an issue.
 | issue_key | Yes | Issue key |
 | max_results | No | Max comments to return (default: 50) |
 | order_by | No | "created" or "-created" for descending |
+
+---
+
+#### update_comment
+
+Replace the body of an existing comment. Supports the same markdown as `add_comment`.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| issue_key | Yes | Issue key |
+| comment_id | Yes | Numeric comment ID (from `get_comments`) |
+| body | Yes | New comment text (max 32,767 chars), replaces the old body |
 
 ---
 
