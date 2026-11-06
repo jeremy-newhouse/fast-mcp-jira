@@ -2,6 +2,7 @@
 
 This module provides tools for managing comments on JIRA issues:
 - add_comment: Add a new comment with markdown support
+- update_comment: Edit an existing comment in place
 - get_comments: List all comments on an issue
 - delete_comment: Remove a comment
 
@@ -67,6 +68,47 @@ async def add_comment(
         return build_response(False, error=str(e), status_code=e.status_code)
     except Exception:
         logger.exception("Unexpected error adding comment to %s", issue_key)
+        return build_response(False, error="Internal error occurred")
+
+
+@mcp.tool(description="Edit an existing comment on a JIRA issue in place (replaces its body).")
+async def update_comment(
+    issue_key: Annotated[str, Field(description="Issue key (e.g., PROJ-123)")],
+    comment_id: Annotated[str, Field(description="Comment ID to edit")],
+    body: Annotated[
+        str,
+        Field(
+            description="New comment text, replacing the old body. Supports markdown: "
+            "**bold**, *italic*, - bullet lists, 1. numbered lists, [] checklists, "
+            "```code blocks```"
+        ),
+    ],
+) -> dict[str, Any]:
+    """Replace the body of an existing comment."""
+    try:
+        issue_key = validate_issue_key(issue_key)
+        validated_id = NumericIdInput(id=comment_id)
+        body = validate_comment_body(body)
+
+        result = await jira.put(
+            f"/rest/api/3/issue/{issue_key}/comment/{validated_id.id}",
+            body={"body": markdown_to_adf(body)},
+        )
+        return build_response(
+            True,
+            comment_id=result.get("id", validated_id.id),
+            issue_key=issue_key,
+            updated=result.get("updated"),
+            author=result.get("author", {}).get("displayName"),
+        )
+    except ValidationError as e:
+        return build_response(False, error=str(e), field=e.field)
+    except PydanticValidationError as e:
+        return build_response(False, error=str(e.errors()[0]["msg"]), field="comment_id")
+    except JiraError as e:
+        return build_response(False, error=str(e), status_code=e.status_code)
+    except Exception:
+        logger.exception("Unexpected error updating comment %s on %s", comment_id, issue_key)
         return build_response(False, error="Internal error occurred")
 
 
